@@ -25,6 +25,7 @@ namespace i2c
 
         constexpr uint32_t LEFT_FREQ_HZ = 400000;
         constexpr uint32_t RIGHT_FREQ_HZ = 400000;
+        constexpr uint64_t STALL_TIME_US = 3000;
 
         constexpr uint16_t DEFAULT_ADDRESS = 0x36;
 
@@ -34,6 +35,8 @@ namespace i2c
             i2c_master_dev_handle_t dev = nullptr;
 
             uint32_t notify_bit = 0;
+            volatile bool pending = false;
+            uint64_t submit_time_us = 0;
             volatile uint64_t completion_time_us = 0;
         };
 
@@ -58,9 +61,9 @@ namespace i2c
             auto *ctx = static_cast<context *>(arg);
 
             ctx->completion_time_us = sys_time::get_us_tick();
+            ctx->pending = false;
 
             BaseType_t task_woken = pdFALSE;
-
             xTaskNotifyFromISR(
                 task_handle,
                 ctx->notify_bit,
@@ -179,6 +182,9 @@ namespace i2c
      */
     void read_left(const uint8_t *reg, uint8_t *data, size_t size)
     {
+        left.submit_time_us = sys_time::get_us_tick();
+        left.pending = true;
+
         ESP_ERROR_CHECK(
             i2c_master_transmit_receive(
                 left.dev,
@@ -198,6 +204,9 @@ namespace i2c
      */
     void read_right(const uint8_t *reg, uint8_t *data, size_t size)
     {
+        right.submit_time_us = sys_time::get_us_tick();
+        right.pending = true;
+
         ESP_ERROR_CHECK(
             i2c_master_transmit_receive(
                 right.dev,
@@ -220,24 +229,58 @@ namespace i2c
     {
         uint8_t data[2] = {reg, value};
 
-        ESP_ERROR_CHECK(
-            i2c_master_transmit(
-                right.dev,
-                data,
-                sizeof(data),
-                -1));
-
-        uint32_t notification = 0;
-
-        do
+        while(true)
         {
-            xTaskNotifyWait(
-                0,
-                RIGHT_DONE,
-                &notification,
-                portMAX_DELAY);
+            right.submit_time_us = sys_time::get_us_tick();
+            right.pending = true;
+
+            ESP_ERROR_CHECK(
+                i2c_master_transmit(
+                    right.dev,
+                    data,
+                    sizeof(data),
+                    -1));
+
+            uint32_t notification = 0;
+
+            if(xTaskNotifyWait(
+                    0,
+                    RIGHT_DONE,
+                    &notification,
+                    pdMS_TO_TICKS(20)) == pdTRUE &&
+                    (notification & RIGHT_DONE))
+            {
+                return;
+            }
         }
-        while((notification & RIGHT_DONE) == 0);
+    }
+
+    /**
+     * @brief 检查左侧 I2C 是否超时
+     *
+     * @param[in] now_us 当前时间
+     *
+     * @return true 事务超时
+     * @return false 事务正常
+     */
+    bool left_stalled(uint64_t now_us)
+    {
+        return left.pending &&
+            now_us - left.submit_time_us >= STALL_TIME_US;
+    }
+
+    /**
+     * @brief 检查右侧 I2C 是否超时
+     *
+     * @param[in] now_us 当前时间
+     *
+     * @return true 事务超时
+     * @return false 事务正常
+     */
+    bool right_stalled(uint64_t now_us)
+    {
+        return right.pending &&
+            now_us - right.submit_time_us >= STALL_TIME_US;
     }
 
     /**
@@ -795,7 +838,7 @@ namespace sensor
                     0,
                     UINT32_MAX,
                     &notification,
-                    portMAX_DELAY);
+                    pdMS_TO_TICKS(10));
 
                 if(notification & i2c::LEFT_DONE)
                 {
@@ -811,6 +854,25 @@ namespace sensor
                     else
                     {
                         handle_right_encoder();
+                    }
+                }
+
+                const uint64_t now_us = sys_time::get_us_tick();
+
+                if(i2c::left_stalled(now_us))
+                {
+                    as5600::start_left_read();
+                }
+
+                if(i2c::right_stalled(now_us))
+                {
+                    if(right_reading_imu)
+                    {
+                        mpu6050::start_read();
+                    }
+                    else
+                    {
+                        as5600::start_right_read();
                     }
                 }
             }
