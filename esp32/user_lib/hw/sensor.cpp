@@ -4,30 +4,29 @@
 #include <math.h>
 #include "driver/i2c_master.h"
 #include "esp_err.h"
-#include "esp_log.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 namespace i2c
 {
+    constexpr uint32_t LEFT_DONE = (1U << 0);
+    constexpr uint32_t RIGHT_DONE = (1U << 1);
+
     namespace
     {
         constexpr i2c_port_num_t LEFT_PORT = 0;
         constexpr i2c_port_num_t RIGHT_PORT = 1;
 
-        constexpr int LEFT_SDA = 19;
-        constexpr int LEFT_SCL = 18;
-        constexpr int RIGHT_SDA = 23;
-        constexpr int RIGHT_SCL = 5;
+        constexpr gpio_num_t LEFT_SDA = GPIO_NUM_19;
+        constexpr gpio_num_t LEFT_SCL = GPIO_NUM_18;
 
-        constexpr uint32_t LEFT_FREQ_HZ = 400000;
+        constexpr gpio_num_t RIGHT_SDA = GPIO_NUM_23;
+        constexpr gpio_num_t RIGHT_SCL = GPIO_NUM_5;
+
+        constexpr uint32_t LEFT_FREQ_HZ = 1000000;
         constexpr uint32_t RIGHT_FREQ_HZ = 400000;
 
-        constexpr uint16_t AS5600_ADDRESS = 0x36;
-
-        constexpr uint32_t NOTIFY_LEFT = (1U << 0);
-        constexpr uint32_t NOTIFY_RIGHT = (1U << 1);
+        constexpr uint16_t DEFAULT_ADDRESS = 0x36;
 
         struct context
         {
@@ -35,12 +34,13 @@ namespace i2c
             i2c_master_dev_handle_t dev = nullptr;
 
             uint32_t notify_bit = 0;
+            volatile uint64_t completion_time_us = 0;
         };
 
         context left;
         context right;
 
-        TaskHandle_t sensor_task_handle = nullptr;
+        TaskHandle_t task_handle = nullptr;
 
         /**
          * @brief I2C 异步事务完成回调
@@ -52,10 +52,12 @@ namespace i2c
         {
             auto *ctx = static_cast<context *>(arg);
 
+            ctx->completion_time_us = sys_time::get_us_tick();
+
             BaseType_t task_woken = pdFALSE;
 
             xTaskNotifyFromISR(
-                sensor_task_handle,
+                task_handle,
                 ctx->notify_bit,
                 eSetBits,
                 &task_woken);
@@ -74,8 +76,8 @@ namespace i2c
         void init_bus(
             context &ctx,
             i2c_port_num_t port,
-            int sda,
-            int scl,
+            gpio_num_t sda,
+            gpio_num_t scl,
             uint32_t frequency,
             uint32_t notify_bit)
         {
@@ -83,13 +85,11 @@ namespace i2c
 
             i2c_master_bus_config_t bus_config{};
             bus_config.i2c_port = port;
-            bus_config.sda_io_num = static_cast<gpio_num_t>(sda);
-            bus_config.scl_io_num = static_cast<gpio_num_t>(scl);
+            bus_config.sda_io_num = sda;
+            bus_config.scl_io_num = scl;
             bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
             bus_config.glitch_ignore_cnt = 7;
-            bus_config.intr_priority = 0;
-            bus_config.trans_queue_depth = 1;       // 启用 asynchronous transaction
-            bus_config.flags.enable_internal_pullup = false;        // 硬件使用外部上拉
+            bus_config.trans_queue_depth = 1;
 
             ESP_ERROR_CHECK(
                 i2c_new_master_bus(
@@ -98,7 +98,7 @@ namespace i2c
 
             i2c_device_config_t dev_config{};
             dev_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-            dev_config.device_address = AS5600_ADDRESS;
+            dev_config.device_address = DEFAULT_ADDRESS;
             dev_config.scl_speed_hz = frequency;
 
             ESP_ERROR_CHECK(
@@ -118,22 +118,12 @@ namespace i2c
         }
     }
 
-    constexpr uint32_t left_notify_bit()
-    {
-        return NOTIFY_LEFT;
-    }
-
-    constexpr uint32_t right_notify_bit()
-    {
-        return NOTIFY_RIGHT;
-    }
-
     /**
      * @brief 初始化两条 I2C 总线
      */
-    void init(TaskHandle_t task_handle)
+    void init(TaskHandle_t sensor_task)
     {
-        sensor_task_handle = task_handle;
+        task_handle = sensor_task;
 
         init_bus(
             left,
@@ -141,7 +131,7 @@ namespace i2c
             LEFT_SDA,
             LEFT_SCL,
             LEFT_FREQ_HZ,
-            NOTIFY_LEFT);
+            LEFT_DONE);
 
         init_bus(
             right,
@@ -149,26 +139,7 @@ namespace i2c
             RIGHT_SDA,
             RIGHT_SCL,
             RIGHT_FREQ_HZ,
-            NOTIFY_RIGHT);
-    }
-
-    /**
-     * @brief 等待指定 I2C 事务完成
-     *
-     * @note 仅供启动初始化阶段使用
-     */
-    void wait(uint32_t notify_bit)
-    {
-        uint32_t notification = 0;
-
-        while((notification & notify_bit) == 0)
-        {
-            xTaskNotifyWait(
-                0,
-                notify_bit,
-                &notification,
-                portMAX_DELAY);
-        }
+            RIGHT_DONE);
     }
 
     /**
@@ -214,24 +185,51 @@ namespace i2c
     }
 
     /**
-     * @brief 右侧 I2C 异步寄存器写入
+     * @brief 右侧 I2C 同步写单寄存器
+     *
+     * @note 仅 MPU6050 初始化阶段使用。
      */
-    void write_right(const uint8_t *data, size_t size)
+    void write_right_sync(uint8_t reg, uint8_t value)
     {
+        uint8_t data[2] = {reg, value};
+
         ESP_ERROR_CHECK(
             i2c_master_transmit(
                 right.dev,
                 data,
-                size,
+                sizeof(data),
                 -1));
+
+        uint32_t notification = 0;
+
+        do
+        {
+            xTaskNotifyWait(
+                0,
+                RIGHT_DONE,
+                &notification,
+                portMAX_DELAY);
+        }
+        while((notification & RIGHT_DONE) == 0);
+    }
+
+    uint64_t left_completion_time_us()
+    {
+        return left.completion_time_us;
+    }
+
+    uint64_t right_completion_time_us()
+    {
+        return right.completion_time_us;
     }
 }
 
 namespace as5600
 {
+    constexpr uint16_t ADDRESS = 0x36;
+
     namespace
     {
-        constexpr uint16_t ADDRESS = 0x36;
         constexpr uint8_t REG_RAW_ANGLE = 0x0C;
 
         constexpr int32_t RESOLUTION = 4096;
@@ -323,19 +321,12 @@ namespace as5600
             }
 
             sensor::encoder_data data;
-
             data.timestamp_us = now_us;
             data.full_count = encoder.full_count;
             data.speed_mrad_s = encoder.speed_mrad_s;
 
             return data;
         }
-    }
-
-
-    constexpr uint16_t address()
-    {
-        return ADDRESS;
     }
 
     /**
@@ -383,12 +374,10 @@ namespace as5600
 
 namespace mpu6050
 {
+    constexpr uint16_t ADDRESS = 0x68;
+
     namespace
     {
-        constexpr const char *TAG = "mpu6050";
-
-        constexpr uint16_t ADDRESS = 0x68;
-
         constexpr uint8_t REG_SMPLRT_DIV = 0x19;
         constexpr uint8_t REG_CONFIG = 0x1A;
         constexpr uint8_t REG_GYRO_CONFIG = 0x1B;
@@ -409,8 +398,6 @@ namespace mpu6050
         float gyro_offset[3] = {};
 
         uint32_t calibration_count = 0;
-        bool calibrated = false;
-
         uint64_t last_time_us = 0;
 
         float angle[3] = {};
@@ -424,25 +411,28 @@ namespace mpu6050
                 static_cast<uint16_t>(data[1]));
         }
 
-        /**
-         * @brief 写入一个 MPU6050 寄存器
-         */
-        void write_register(uint8_t address, uint8_t value)
-        {
-            uint8_t tx[2] = {address, value};
-            i2c::write_right(tx, sizeof(tx));
+        // /**
+        //  * @brief 写入一个 MPU6050 寄存器
+        //  */
+        // void write_register(uint8_t address, uint8_t value)
+        // {
+        //     uint8_t tx[2] = {address, value};
+        //     i2c::write_right(tx, sizeof(tx));
 
-            // tx 位于栈上
-            // 必须等异步事务真正结束后才能返回
-            i2c::wait(i2c::right_notify_bit());
-        }
+        //     // tx 位于栈上
+        //     // 必须等异步事务真正结束后才能返回
+        //     i2c::wait(i2c::right_notify_bit());
+        // }
 
         /**
          * @brief 处理陀螺仪启动校准
          */
         bool process_calibration(const int16_t raw_gyro[3])
         {
-            if(calibrated){return true;}
+            if(calibration_count >= CALIBRATION_SAMPLES)
+            {
+                return true;
+            }
 
             for(uint8_t i = 0; i < 3; i++)
             {
@@ -464,21 +454,10 @@ namespace mpu6050
                     DEG2RAD;
             }
 
-            calibrated = true;
             last_time_us = 0;
-
-            ESP_LOGI(
-                TAG,
-                "gyro calibration finished");
 
             return false;
         }
-    }
-
-
-    constexpr uint16_t address()
-    {
-        return ADDRESS;
     }
 
     /**
@@ -491,7 +470,7 @@ namespace mpu6050
         /*
          * PLL X gyro clock
          */
-        write_register(REG_PWR_MGMT_1, 0x01);
+        i2c::write_right_sync(REG_PWR_MGMT_1, 0x01);
 
         sys_time::delay_ms(10);
 
@@ -501,27 +480,27 @@ namespace mpu6050
          * Gyro/Accel bandwidth ≈ 44 Hz
          * Gyro internal output rate = 1 kHz
          */
-        write_register(REG_CONFIG, 0x03);
+        i2c::write_right_sync(REG_CONFIG, 0x03);
 
         /*
          * 1000 / (1 + 4)
          * = 200 Hz
          */
-        write_register(REG_SMPLRT_DIV, 0x04);
+        i2c::write_right_sync(REG_SMPLRT_DIV, 0x04);
 
         /*
          * ±500 deg/s
          * 65.5 LSB/(deg/s)
          */
-        write_register(REG_GYRO_CONFIG, 0x08);
+        i2c::write_right_sync(REG_GYRO_CONFIG, 0x08);
 
         /*
          * ±2 g
          * 16384 LSB/g
          */
-        write_register(REG_ACCEL_CONFIG, 0x00);
+        i2c::write_right_sync(REG_ACCEL_CONFIG, 0x00);
 
-        i2c::set_right_address(as5600::address());
+        i2c::set_right_address(as5600::ADDRESS);
     }
 
     /**
@@ -587,10 +566,8 @@ namespace mpu6050
             atan2f(
                 -data.acc[0],
                 sqrtf(
-                    data.acc[1] *
-                    data.acc[1] +
-                    data.acc[2] *
-                    data.acc[2]));
+                    data.acc[1] * data.acc[1] +
+                    data.acc[2] * data.acc[2]));
 
         if(last_time_us == 0)
         {
@@ -620,18 +597,15 @@ namespace mpu6050
                 ACC_COEF *
                 acc_pitch;
 
-            angle[2] +=
-                data.gyro[2] * dt;
+            angle[2] += data.gyro[2] * dt;
 
             if(angle[2] > PI)
             {
-                angle[2] -=
-                    2.0f * PI;
+                angle[2] -= 2.0f * PI;
             }
             else if(angle[2] < -PI)
             {
-                angle[2] +=
-                    2.0f * PI;
+                angle[2] += 2.0f * PI;
             }
         }
 
@@ -650,34 +624,29 @@ namespace sensor
 {
     namespace
     {
-        constexpr const char *TAG = "sensor";
-
-        constexpr uint64_t MPU6050_PERIOD_US = 5000;
+        constexpr uint64_t MPU_PERIOD_US = 5000;
 
         constexpr uint32_t TASK_STACK = 4096;
-        constexpr UBaseType_t TASK_PRIORITY = 20;
+        constexpr UBaseType_t TASK_PRIORITY = 5;
         constexpr BaseType_t TASK_CORE = 1;
+
+        constexpr uint8_t VALID_LEFT = (1U << 0);
+        constexpr uint8_t VALID_RIGHT = (1U << 1);
+        constexpr uint8_t VALID_IMU = (1U << 2);
+        constexpr uint8_t VALID_ALL =
+            VALID_LEFT |
+            VALID_RIGHT |
+            VALID_IMU;
 
         package latest_package;
 
-        bool left_valid = false;
-        bool right_valid = false;
-        bool imu_valid = false;
-
+        uint8_t valid_flags = 0;
         bool started = false;
 
         portMUX_TYPE package_lock = portMUX_INITIALIZER_UNLOCKED;
 
+        bool right_reading_imu = false;
         uint64_t next_imu_time_us = 0;
-
-        enum class right_phase : uint8_t
-        {
-            encoder,
-            imu
-        };
-
-        right_phase phase = right_phase::encoder;
-
 
         /**
          * @brief 发布左编码器数据
@@ -686,7 +655,7 @@ namespace sensor
         {
             portENTER_CRITICAL(&package_lock);
             latest_package.left_encoder = data;
-            left_valid = true;
+            valid_flags |= VALID_LEFT;
             portEXIT_CRITICAL(&package_lock);
         }
 
@@ -697,7 +666,7 @@ namespace sensor
         {
             portENTER_CRITICAL(&package_lock);
             latest_package.right_encoder = data;
-            right_valid = true;
+            valid_flags |= VALID_RIGHT;
             portEXIT_CRITICAL(&package_lock);
         }
 
@@ -708,20 +677,8 @@ namespace sensor
         {
             portENTER_CRITICAL(&package_lock);
             latest_package.imu = data;
-            imu_valid = true;
+            valid_flags |= VALID_IMU;
             portEXIT_CRITICAL(&package_lock);
-        }
-
-        /**
-         * @brief 推进 MPU6050 的 200 Hz deadline
-         */
-        void update_imu_deadline(uint64_t now_us)
-        {
-            do
-            {
-                next_imu_time_us += MPU6050_PERIOD_US;
-            }
-            while(now_us >= next_imu_time_us);
         }
 
         /**
@@ -729,8 +686,7 @@ namespace sensor
          */
         void handle_left_i2c()
         {
-            const uint64_t now_us = sys_time::get_us_tick();
-            publish_left(as5600::process_left(now_us));
+            publish_left(as5600::process_left(i2c::left_completion_time_us()));
             as5600::start_left_read();
         }
 
@@ -739,15 +695,20 @@ namespace sensor
          */
         void handle_right_encoder()
         {
-            const uint64_t now_us = sys_time::get_us_tick();
+            const uint64_t now_us = i2c::right_completion_time_us();
             publish_right(as5600::process_right(now_us));
 
             // MPU6050 到时间后插队一次
             if(now_us >= next_imu_time_us)
             {
-                update_imu_deadline(now_us);
-                phase = right_phase::imu;
-                i2c::set_right_address(mpu6050::address());
+                do
+                {
+                    next_imu_time_us += MPU_PERIOD_US;
+                }
+                while(now_us >= next_imu_time_us);
+
+                right_reading_imu = true;
+                i2c::set_right_address(mpu6050::ADDRESS);
                 mpu6050::start_read();
                 return;
             }
@@ -760,35 +721,16 @@ namespace sensor
          */
         void handle_imu()
         {
-            const uint64_t now_us = sys_time::get_us_tick();
-
             imu_data data;
-            if(mpu6050::process(now_us, data))
+            if(mpu6050::process(i2c::right_completion_time_us(), data))
             {
                 publish_imu(data);
             }
 
             // MPU 完成后立即切回 AS5600
-            i2c::set_right_address(as5600::address());
-            phase = right_phase::encoder;
+            i2c::set_right_address(as5600::ADDRESS);
+            right_reading_imu = false;
             as5600::start_right_read();
-        }
-
-        /**
-         * @brief 右侧 I2C 完成
-         */
-        void handle_right_i2c()
-        {
-            switch(phase)
-            {
-                case right_phase::encoder:
-                    handle_right_encoder();
-                    break;
-
-                case right_phase::imu:
-                    handle_imu();
-                    break;
-            }
         }
 
         /**
@@ -796,15 +738,13 @@ namespace sensor
          */
         void task(void *)
         {
-            i2c::init(xTaskGetCurrentTaskHandle());     // sensor task 是唯一 I2C owner
+            i2c::init(xTaskGetCurrentTaskHandle());
 
             mpu6050::init();
-            next_imu_time_us = sys_time::get_us_tick() + MPU6050_PERIOD_US;
+            next_imu_time_us = sys_time::get_us_tick() + MPU_PERIOD_US;
 
             as5600::start_left_read();
             as5600::start_right_read();
-
-            ESP_LOGI(TAG, "sensor started");
 
             while(true)
             {
@@ -816,14 +756,21 @@ namespace sensor
                     &notification,
                     portMAX_DELAY);
 
-                if(notification & i2c::left_notify_bit())
+                if(notification & i2c::LEFT_DONE)
                 {
                     handle_left_i2c();
                 }
 
-                if(notification & i2c::right_notify_bit())
+                if(notification & i2c::RIGHT_DONE)
                 {
-                    handle_right_i2c();
+                    if(right_reading_imu)
+                    {
+                        handle_imu();
+                    }
+                    else
+                    {
+                        handle_right_encoder();
+                    }
                 }
             }
         }
@@ -833,53 +780,36 @@ namespace sensor
     {
         if(started){return true;}
 
-        const BaseType_t result =
-            xTaskCreatePinnedToCore(
-                task,
-                "sensor",
-                TASK_STACK,
-                nullptr,
-                TASK_PRIORITY,
-                nullptr,
-                TASK_CORE);
+        if(xTaskCreatePinnedToCore(
+            task,
+            "sensor",
+            TASK_STACK,
+            nullptr,
+            TASK_PRIORITY,
+            nullptr,
+            TASK_CORE) != pdPASS)
+        {
+            return false;
+        }
 
-        if(result != pdPASS){return false;}
         started = true;
-
         return true;
     }
 
     bool ready()
     {
-        bool value;
-
         portENTER_CRITICAL(&package_lock);
-
-        value =
-            left_valid &&
-            right_valid &&
-            imu_valid;
-
+        const bool result = valid_flags == VALID_ALL;
         portEXIT_CRITICAL(&package_lock);
-
-        return value;
+        return result;
     }
 
     bool get_package(package &snapshot)
     {
-        bool valid;
-
         portENTER_CRITICAL(&package_lock);
-
-        valid =
-            left_valid &&
-            right_valid &&
-            imu_valid;
-
+        const bool valid = valid_flags == VALID_ALL;
         if(valid){snapshot = latest_package;}
-
         portEXIT_CRITICAL(&package_lock);
-
         return valid;
     }
 }
