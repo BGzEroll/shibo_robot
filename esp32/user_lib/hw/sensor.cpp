@@ -212,6 +212,19 @@ namespace i2c
                 size,
                 -1));
     }
+
+    /**
+     * @brief 右侧 I2C 异步寄存器写入
+     */
+    void write_right(const uint8_t *data, size_t size)
+    {
+        ESP_ERROR_CHECK(
+            i2c_master_transmit(
+                right.dev,
+                data,
+                size,
+                -1));
+    }
 }
 
 namespace as5600
