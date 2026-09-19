@@ -23,7 +23,7 @@ namespace i2c
         constexpr gpio_num_t RIGHT_SDA = GPIO_NUM_23;
         constexpr gpio_num_t RIGHT_SCL = GPIO_NUM_5;
 
-        constexpr uint32_t LEFT_FREQ_HZ = 1000000;
+        constexpr uint32_t LEFT_FREQ_HZ = 400000;
         constexpr uint32_t RIGHT_FREQ_HZ = 400000;
 
         constexpr uint16_t DEFAULT_ADDRESS = 0x36;
@@ -630,23 +630,12 @@ namespace sensor
         constexpr UBaseType_t TASK_PRIORITY = 5;
         constexpr BaseType_t TASK_CORE = 1;
 
-        constexpr uint8_t VALID_LEFT = (1U << 0);
-        constexpr uint8_t VALID_RIGHT = (1U << 1);
-        constexpr uint8_t VALID_IMU = (1U << 2);
-        constexpr uint8_t VALID_ALL =
-            VALID_LEFT |
-            VALID_RIGHT |
-            VALID_IMU;
-
-        package latest_package;
-
-        uint8_t valid_flags = 0;
-        bool started = false;
-
         portMUX_TYPE package_lock = portMUX_INITIALIZER_UNLOCKED;
 
+        package latest_package;
         bool right_reading_imu = false;
         uint64_t next_imu_time_us = 0;
+        bool started = false;
 
         /**
          * @brief 发布左编码器数据
@@ -655,7 +644,6 @@ namespace sensor
         {
             portENTER_CRITICAL(&package_lock);
             latest_package.left_encoder = data;
-            valid_flags |= VALID_LEFT;
             portEXIT_CRITICAL(&package_lock);
         }
 
@@ -666,7 +654,6 @@ namespace sensor
         {
             portENTER_CRITICAL(&package_lock);
             latest_package.right_encoder = data;
-            valid_flags |= VALID_RIGHT;
             portEXIT_CRITICAL(&package_lock);
         }
 
@@ -677,7 +664,6 @@ namespace sensor
         {
             portENTER_CRITICAL(&package_lock);
             latest_package.imu = data;
-            valid_flags |= VALID_IMU;
             portEXIT_CRITICAL(&package_lock);
         }
 
@@ -796,20 +782,11 @@ namespace sensor
         return true;
     }
 
-    bool ready()
-    {
-        portENTER_CRITICAL(&package_lock);
-        const bool result = valid_flags == VALID_ALL;
-        portEXIT_CRITICAL(&package_lock);
-        return result;
-    }
-
     bool get_package(package &snapshot)
     {
         portENTER_CRITICAL(&package_lock);
-        const bool valid = valid_flags == VALID_ALL;
-        if(valid){snapshot = latest_package;}
+        snapshot = latest_package;
         portEXIT_CRITICAL(&package_lock);
-        return valid;
+        return snapshot.imu.timestamp_us != 0;
     }
 }

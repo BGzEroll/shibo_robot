@@ -32,7 +32,6 @@ namespace sensor
     };
 
     bool init();
-    bool ready();
     bool get_package(package &snapshot);
 
 }
