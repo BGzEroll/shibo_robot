@@ -33,7 +33,6 @@ namespace sensor
 
     bool init();
     bool get_package(package &snapshot);
-
 }
 
 #endif

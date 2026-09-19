@@ -44,6 +44,11 @@ namespace i2c
 
         /**
          * @brief I2C 异步事务完成回调
+         *
+         * @param[in] arg I2C 上下文
+         *
+         * @return true 已唤醒高优先级任务
+         * @return false 未唤醒高优先级任务
          */
         bool done_callback(
             i2c_master_dev_handle_t,
@@ -71,7 +76,14 @@ namespace i2c
         }
 
         /**
-         * @brief 初始化一条固定 I2C 总线
+         * @brief 初始化 I2C 总线
+         *
+         * @param[in, out] ctx I2C 上下文
+         * @param[in] port I2C 控制器
+         * @param[in] sda SDA 引脚
+         * @param[in] scl SCL 引脚
+         * @param[in] frequency 总线频率
+         * @param[in] notify_bit 任务通知位
          */
         void init_bus(
             context &ctx,
@@ -119,7 +131,9 @@ namespace i2c
     }
 
     /**
-     * @brief 初始化两条 I2C 总线
+     * @brief 初始化传感器 I2C
+     *
+     * @param[in] sensor_task Sensor 任务句柄
      */
     void init(TaskHandle_t sensor_task)
     {
@@ -143,7 +157,9 @@ namespace i2c
     }
 
     /**
-     * @brief 修改右侧 I2C 当前设备地址
+     * @brief 修改右侧 I2C 设备地址
+     *
+     * @param[in] address 设备地址
      */
     void set_right_address(uint16_t address)
     {
@@ -155,7 +171,11 @@ namespace i2c
     }
 
     /**
-     * @brief 左侧 I2C 异步寄存器读取
+     * @brief 发起左侧 I2C 异步读取
+     *
+     * @param[in] reg 寄存器地址
+     * @param[out] data 接收缓冲区
+     * @param[in] size 读取长度
      */
     void read_left(const uint8_t *reg, uint8_t *data, size_t size)
     {
@@ -170,7 +190,11 @@ namespace i2c
     }
 
     /**
-     * @brief 右侧 I2C 异步寄存器读取
+     * @brief 发起右侧 I2C 异步读取
+     *
+     * @param[in] reg 寄存器地址
+     * @param[out] data 接收缓冲区
+     * @param[in] size 读取长度
      */
     void read_right(const uint8_t *reg, uint8_t *data, size_t size)
     {
@@ -185,9 +209,12 @@ namespace i2c
     }
 
     /**
-     * @brief 右侧 I2C 同步写单寄存器
+     * @brief 同步写入右侧 I2C 单寄存器
      *
-     * @note 仅 MPU6050 初始化阶段使用。
+     * @param[in] reg 寄存器地址
+     * @param[in] value 寄存器值
+     *
+     * @note 仅用于 IMU 初始化
      */
     void write_right_sync(uint8_t reg, uint8_t value)
     {
@@ -213,11 +240,21 @@ namespace i2c
         while((notification & RIGHT_DONE) == 0);
     }
 
+    /**
+     * @brief 获取左侧 I2C 完成时间
+     *
+     * @return 事务完成时间，单位 us
+     */
     uint64_t left_completion_time_us()
     {
         return left.completion_time_us;
     }
 
+    /**
+     * @brief 获取右侧 I2C 完成时间
+     *
+     * @return 事务完成时间，单位 us
+     */
     uint64_t right_completion_time_us()
     {
         return right.completion_time_us;
@@ -263,6 +300,11 @@ namespace as5600
 
         /**
          * @brief 处理一次 AS5600 采样
+         *
+         * @param[in, out] encoder 编码器状态
+         * @param[in] now_us 采样完成时间
+         *
+         * @return 编码器数据
          */
         sensor::encoder_data process(state &encoder, uint64_t now_us)
         {
@@ -352,7 +394,11 @@ namespace as5600
     }
 
     /**
-     * @brief 处理左编码器新数据
+     * @brief 处理左编码器数据
+     *
+     * @param[in] now_us 采样完成时间
+     *
+     * @return 左编码器数据
      */
     sensor::encoder_data process_left(uint64_t now_us)
     {
@@ -362,7 +408,11 @@ namespace as5600
     }
 
     /**
-     * @brief 处理右编码器新数据
+     * @brief 处理右编码器数据
+     *
+     * @param[in] now_us 采样完成时间
+     *
+     * @return 右编码器数据
      */
     sensor::encoder_data process_right(uint64_t now_us)
     {
@@ -403,7 +453,11 @@ namespace mpu6050
         float angle[3] = {};
 
         /**
-         * @brief 读取大端 int16
+         * @brief 读取大端有符号 16 位数据
+         *
+         * @param[in] data 原始数据
+         *
+         * @return 转换后的数值
          */
         int16_t read_i16(const uint8_t *data)
         {
@@ -411,21 +465,13 @@ namespace mpu6050
                 static_cast<uint16_t>(data[1]));
         }
 
-        // /**
-        //  * @brief 写入一个 MPU6050 寄存器
-        //  */
-        // void write_register(uint8_t address, uint8_t value)
-        // {
-        //     uint8_t tx[2] = {address, value};
-        //     i2c::write_right(tx, sizeof(tx));
-
-        //     // tx 位于栈上
-        //     // 必须等异步事务真正结束后才能返回
-        //     i2c::wait(i2c::right_notify_bit());
-        // }
-
         /**
-         * @brief 处理陀螺仪启动校准
+         * @brief 处理陀螺仪零偏校准
+         *
+         * @param[in] raw_gyro 原始陀螺仪数据
+         *
+         * @return true 校准完成
+         * @return false 校准进行中
          */
         bool process_calibration(const int16_t raw_gyro[3])
         {
@@ -515,10 +561,13 @@ namespace mpu6050
     }
 
     /**
-     * @brief 处理一帧 MPU6050 数据
+     * @brief 处理一次 MPU6050 采样
      *
-     * @return true 已产生有效 IMU 数据
-     * @return false 尚处于启动校准阶段
+     * @param[in] now_us 采样完成时间
+     * @param[out] data IMU 数据
+     *
+     * @return true 数据有效
+     * @return false 陀螺仪仍在校准
      */
     bool process(uint64_t now_us, sensor::imu_data &data)
     {
@@ -639,6 +688,8 @@ namespace sensor
 
         /**
          * @brief 发布左编码器数据
+         *
+         * @param[in] data 左编码器数据
          */
         void publish_left(const encoder_data &data)
         {
@@ -649,6 +700,8 @@ namespace sensor
 
         /**
          * @brief 发布右编码器数据
+         *
+         * @param[in] data 右编码器数据
          */
         void publish_right(const encoder_data &data)
         {
@@ -659,6 +712,8 @@ namespace sensor
 
         /**
          * @brief 发布 IMU 数据
+         *
+         * @param[in] data IMU 数据
          */
         void publish_imu(const imu_data &data)
         {
@@ -668,16 +723,16 @@ namespace sensor
         }
 
         /**
-         * @brief 左侧 I2C 完成
+         * @brief 处理左编码器事务完成
          */
-        void handle_left_i2c()
+        void handle_left_encoder()
         {
             publish_left(as5600::process_left(i2c::left_completion_time_us()));
             as5600::start_left_read();
         }
 
         /**
-         * @brief 右 AS5600 完成
+         * @brief 处理右编码器事务完成
          */
         void handle_right_encoder()
         {
@@ -703,7 +758,7 @@ namespace sensor
         }
 
         /**
-         * @brief MPU6050 完成
+         * @brief 处理 MPU6050 事务完成
          */
         void handle_imu()
         {
@@ -720,7 +775,7 @@ namespace sensor
         }
 
         /**
-         * @brief Sensor task
+         * @brief Sensor 任务入口
          */
         void task(void *)
         {
@@ -744,7 +799,7 @@ namespace sensor
 
                 if(notification & i2c::LEFT_DONE)
                 {
-                    handle_left_i2c();
+                    handle_left_encoder();
                 }
 
                 if(notification & i2c::RIGHT_DONE)
@@ -762,6 +817,12 @@ namespace sensor
         }
     }
 
+    /**
+     * @brief 初始化传感器模块
+     *
+     * @return true 初始化成功
+     * @return false Sensor 任务创建失败
+     */
     bool init()
     {
         if(started){return true;}
@@ -782,6 +843,14 @@ namespace sensor
         return true;
     }
 
+    /**
+     * @brief 获取最新传感器数据
+     *
+     * @param[out] snapshot 传感器数据快照
+     *
+     * @return true 数据有效
+     * @return false IMU 尚未完成校准
+     */
     bool get_package(package &snapshot)
     {
         portENTER_CRITICAL(&package_lock);
