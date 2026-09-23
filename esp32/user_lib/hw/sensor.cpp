@@ -838,7 +838,7 @@ namespace sensor
                     0,
                     UINT32_MAX,
                     &notification,
-                    pdMS_TO_TICKS(10));
+                    pdMS_TO_TICKS(3));
 
                 if(notification & i2c::LEFT_DONE)
                 {
