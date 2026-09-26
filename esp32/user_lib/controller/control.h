@@ -10,10 +10,12 @@ namespace control
         preparing,
         init_failed,
         wait_sensor,
+        wait_gamepad,
         wait_pitch,
-        arming,
+        wait_button,
         active,
         tripped_sensor,
+        tripped_gamepad,
         tripped_pitch
     };
 
@@ -22,7 +24,6 @@ namespace control
         arm_state state = arm_state::preparing;
         float pitch_rad = 0.0f;
         float speed_m_s = 0.0f;
-        uint32_t upright_ms = 0;
     };
 
     bool init();

@@ -1,6 +1,7 @@
 #include "control.h"
 
 #include "balance.h"
+#include "hw/gamepad.h"
 #include "hw/motor.h"
 #include "hw/sensor.h"
 #include "sys_time.h"
@@ -17,9 +18,7 @@ namespace control
         constexpr uint32_t PERIOD_MS = 1;
         constexpr uint64_t ENCODER_TIMEOUT_US = 5000;
         constexpr uint64_t IMU_TIMEOUT_US = 15000;
-        // 调试用自动启动条件，接入手柄后删除。
         constexpr float ARM_PITCH_RAD = 0.15f;
-        constexpr uint32_t ARM_TICKS = 100;
         constexpr float TRIP_PITCH_RAD = 0.5f;
 
         balance::config settings;
@@ -48,7 +47,9 @@ namespace control
         void task(void *)
         {
             TickType_t last_wake = xTaskGetTickCount();
-            uint32_t upright_ticks = 0;
+            uint32_t last_session = 0;
+            uint16_t last_buttons = 0;
+            bool last_pad_ready = false;
             bool engaged = false;
             bool tripped = false;
             arm_state trip_reason = arm_state::tripped_sensor;
@@ -57,7 +58,22 @@ namespace control
             {
                 sensor::package snapshot;
                 const bool imu_ready = sensor::get_package(snapshot);
+                gamepad::state pad;
+                const bool pad_ready = gamepad::get_state(pad);
                 const uint64_t now_us = sys_time::get_us_tick();
+
+                bool rb_pressed = false;
+                if(pad_ready)
+                {
+                    if(last_pad_ready && pad.session == last_session)
+                    {
+                        rb_pressed = (pad.buttons & gamepad::button::RB) &&
+                            !(last_buttons & gamepad::button::RB);
+                    }
+                    last_session = pad.session;
+                    last_buttons = pad.buttons;
+                }
+                last_pad_ready = pad_ready;
 
                 const bool fresh = imu_ready &&
                     snapshot.left_encoder.timestamp_us != 0 &&
@@ -81,12 +97,14 @@ namespace control
                     0.5f *
                     settings.wheel_radius_m;
 
-                if(engaged && (!fresh || fabsf(pitch) > TRIP_PITCH_RAD))
+                if(engaged && (!fresh || !pad_ready ||
+                    fabsf(pitch) > TRIP_PITCH_RAD))
                 {
                     engaged = false;
                     tripped = true;
-                    trip_reason = fresh ? arm_state::tripped_pitch :
-                        arm_state::tripped_sensor;
+                    trip_reason = !fresh ? arm_state::tripped_sensor :
+                        !pad_ready ? arm_state::tripped_gamepad :
+                        arm_state::tripped_pitch;
                 }
 
                 if(!engaged)
@@ -94,18 +112,12 @@ namespace control
                     balance::reset();
                     motor::set_target(0, 0, false);
 
-                    bool enable_request = false;
-                    // 调试用自动启动：连续扶正后请求使能，接入手柄后替换此段。
-                    if(!tripped && fresh && fabsf(pitch) < ARM_PITCH_RAD)
+                    if(rb_pressed && fresh && pad_ready &&
+                        fabsf(pitch) < ARM_PITCH_RAD)
                     {
-                        enable_request = ++upright_ticks >= ARM_TICKS;
+                        engaged = true;
+                        tripped = false;
                     }
-                    else
-                    {
-                        upright_ticks = 0;
-                    }
-
-                    if(!tripped && fresh && enable_request){engaged = true;}
                 }
                 else
                 {
@@ -127,16 +139,17 @@ namespace control
                         true);
                 }
 
-                arm_state state = arm_state::arming;
+                arm_state state = arm_state::wait_button;
                 if(tripped){state = trip_reason;}
                 else if(engaged){state = arm_state::active;}
                 else if(!fresh){state = arm_state::wait_sensor;}
+                else if(!pad_ready){state = arm_state::wait_gamepad;}
                 else if(fabsf(pitch) >= ARM_PITCH_RAD)
                 {
                     state = arm_state::wait_pitch;
                 }
 
-                publish_status({state, pitch, speed, upright_ticks * PERIOD_MS});
+                publish_status({state, pitch, speed});
 
                 vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PERIOD_MS));
             }
