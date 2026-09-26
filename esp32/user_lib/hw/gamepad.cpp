@@ -24,7 +24,9 @@ namespace gamepad
         struct report
         {
             uint16_t value = 0;
+            uint16_t end = 0;
             uint16_t cccd = 0;
+            bool readable = false;
         };
 
         portMUX_TYPE state_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -47,6 +49,9 @@ namespace gamepad
         device discovered[MAX_DEVICES];
         uint8_t discovered_count = 0;
         int32_t scan_error = 0;
+        link_phase phase = link_phase::searching;
+        link_phase failed_at = link_phase::searching;
+        int32_t link_error = 0;
         ble_npl_event command_event;
         uint8_t command = 0;
 
@@ -61,6 +66,18 @@ namespace gamepad
         }
 
         int gap_event(ble_gap_event *event, void *);
+
+        /**
+         * @brief 发布连接阶段和最近一次错误
+         */
+        void set_phase(link_phase next, int32_t error = 0)
+        {
+            portENTER_CRITICAL(&state_lock);
+            if(next == link_phase::failed){failed_at = phase;}
+            phase = next;
+            if(error || next == link_phase::connecting){link_error = error;}
+            portEXIT_CRITICAL(&state_lock);
+        }
 
         /**
          * @brief 搜索旧项目使用的 Xbox BLE 手柄
@@ -141,6 +158,7 @@ namespace gamepad
             next.session = latest_state.session;
             latest_state = next;
             portEXIT_CRITICAL(&state_lock);
+            set_phase(link_phase::ready);
         }
 
         /**
@@ -156,6 +174,7 @@ namespace gamepad
         {
             if(error->status != 0)
             {
+                set_phase(link_phase::failed, error->status);
                 ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
                 return 0;
             }
@@ -171,10 +190,12 @@ namespace gamepad
             ble_gatt_attr *, void *)
         {
             const uint8_t enabled[] = {1, 0};
-            if(ble_gattc_write_flat(connection,
+            const int32_t result = ble_gattc_write_flat(connection,
                 reports[subscribe_index].cccd, enabled, sizeof(enabled),
-                subscribed, nullptr) != 0)
+                subscribed, nullptr);
+            if(result != 0)
             {
+                set_phase(link_phase::failed, result);
                 ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             }
             return 0;
@@ -182,15 +203,29 @@ namespace gamepad
 
         void subscribe()
         {
+            set_phase(link_phase::subscribing);
             while(subscribe_index < report_count)
             {
                 if(reports[subscribe_index].cccd != 0){break;}
                 subscribe_index++;
             }
-            if(subscribe_index < report_count &&
-                ble_gattc_read(connection, reports[subscribe_index].value,
-                    report_read, nullptr) != 0)
+            if(subscribe_index >= report_count){return;}
+            int32_t result;
+            if(reports[subscribe_index].readable)
             {
+                result = ble_gattc_read(connection,
+                    reports[subscribe_index].value, report_read, nullptr);
+            }
+            else
+            {
+                const uint8_t enabled[] = {1, 0};
+                result = ble_gattc_write_flat(connection,
+                    reports[subscribe_index].cccd, enabled, sizeof(enabled),
+                    subscribed, nullptr);
+            }
+            if(result != 0)
+            {
+                set_phase(link_phase::failed, result);
                 ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             }
         }
@@ -199,7 +234,7 @@ namespace gamepad
          * @brief 查找 HID 报告的通知描述符
          */
         int descriptor_found(uint16_t, const ble_gatt_error *error,
-            uint16_t value, const ble_gatt_dsc *descriptor, void *)
+            uint16_t, const ble_gatt_dsc *descriptor, void *)
         {
             if(error->status == BLE_HS_EDONE)
             {
@@ -210,6 +245,7 @@ namespace gamepad
                 }
                 if(!found)
                 {
+                    set_phase(link_phase::failed, BLE_HS_ENOENT);
                     ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
                     return 0;
                 }
@@ -222,7 +258,8 @@ namespace gamepad
                 {
                     for(uint8_t i = 0; i < report_count; i++)
                     {
-                        if(reports[i].value == value)
+                        if(descriptor->handle > reports[i].value &&
+                            descriptor->handle <= reports[i].end)
                         {
                             reports[i].cccd = descriptor->handle;
                             break;
@@ -232,6 +269,7 @@ namespace gamepad
             }
             else
             {
+                set_phase(link_phase::failed, error->status);
                 ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             }
             return 0;
@@ -245,23 +283,38 @@ namespace gamepad
         {
             if(error->status == BLE_HS_EDONE)
             {
-                if(report_count == 0 || ble_gattc_disc_all_dscs(connection,
-                    service_start, service_end, descriptor_found, nullptr) != 0)
+                if(report_count && reports[report_count - 1].end == 0)
                 {
+                    reports[report_count - 1].end = service_end;
+                }
+                const int32_t result = report_count == 0 ? BLE_HS_ENOENT :
+                    ble_gattc_disc_all_dscs(connection, service_start,
+                        service_end, descriptor_found, nullptr);
+                if(result != 0)
+                {
+                    set_phase(link_phase::failed, result);
                     ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
                 }
             }
             else if(error->status == 0)
             {
+                if(report_count && reports[report_count - 1].end == 0)
+                {
+                    reports[report_count - 1].end =
+                        characteristic->def_handle - 1;
+                }
                 if(ble_uuid_u16(&characteristic->uuid.u) == 0x2a4d &&
                     (characteristic->properties & BLE_GATT_CHR_F_NOTIFY) &&
                     report_count < MAX_REPORTS)
                 {
                     reports[report_count++].value = characteristic->val_handle;
+                    reports[report_count - 1].readable =
+                        characteristic->properties & BLE_GATT_CHR_F_READ;
                 }
             }
             else
             {
+                set_phase(link_phase::failed, error->status);
                 ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             }
             return 0;
@@ -275,9 +328,12 @@ namespace gamepad
         {
             if(error->status == BLE_HS_EDONE)
             {
-                if(service_start == 0 || ble_gattc_disc_all_chrs(connection,
-                    service_start, service_end, characteristic_found, nullptr) != 0)
+                const int32_t result = service_start == 0 ? BLE_HS_ENOENT :
+                    ble_gattc_disc_all_chrs(connection, service_start,
+                        service_end, characteristic_found, nullptr);
+                if(result != 0)
                 {
+                    set_phase(link_phase::failed, result);
                     ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
                 }
             }
@@ -288,6 +344,7 @@ namespace gamepad
             }
             else
             {
+                set_phase(link_phase::failed, error->status);
                 ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
             }
             return 0;
@@ -409,6 +466,11 @@ namespace gamepad
                                 device &found = discovered[index];
                                 found.rssi = event->disc.rssi;
                                 found.xbox |= xbox;
+                                found.connectable |=
+                                    event->disc.event_type ==
+                                        BLE_HCI_ADV_RPT_EVTYPE_ADV_IND ||
+                                    event->disc.event_type ==
+                                        BLE_HCI_ADV_RPT_EVTYPE_DIR_IND;
                                 if(parsed && fields.name && fields.name_len)
                                 {
                                     const uint8_t length = fields.name_len <
@@ -425,16 +487,32 @@ namespace gamepad
                         const bool selected = target_set;
                         const ble_addr_t selected_address = target;
                         portEXIT_CRITICAL(&state_lock);
+                        if(event->disc.event_type !=
+                            BLE_HCI_ADV_RPT_EVTYPE_ADV_IND &&
+                            event->disc.event_type !=
+                            BLE_HCI_ADV_RPT_EVTYPE_DIR_IND)
+                        {
+                            break;
+                        }
                         if(selected ? memcmp(&selected_address, &address,
                             sizeof(address)) != 0 : !is_xbox(event->disc))
                         {
                             break;
                         }
                         connecting = true;
-                        ble_gap_disc_cancel();
-                        if(ble_gap_connect(own_address_type, &address, 10000,
-                            nullptr, gap_event, nullptr) != 0)
+                        set_phase(link_phase::connecting);
+                        const int32_t cancel_result = ble_gap_disc_cancel();
+                        if(cancel_result != 0)
                         {
+                            set_phase(link_phase::failed, cancel_result);
+                            connecting = false;
+                            break;
+                        }
+                        const int32_t result = ble_gap_connect(own_address_type,
+                            &address, 10000, nullptr, gap_event, nullptr);
+                        if(result != 0)
+                        {
+                            set_phase(link_phase::failed, result);
                             connecting = false;
                             scan();
                         }
@@ -442,9 +520,11 @@ namespace gamepad
                     break;
 
                 case BLE_GAP_EVENT_CONNECT:
+                {
                     connecting = false;
                     if(event->connect.status != 0)
                     {
+                        set_phase(link_phase::failed, event->connect.status);
                         scan();
                         break;
                     }
@@ -455,24 +535,30 @@ namespace gamepad
                     subscribe_index = 0;
                     memset(reports, 0, sizeof(reports));
                     disconnect();
-                    portENTER_CRITICAL(&state_lock);
-                    latest_state.connected = true;
-                    portEXIT_CRITICAL(&state_lock);
-                    if(ble_gap_security_initiate(connection) != 0)
+                    set_phase(link_phase::pairing);
+                    const int32_t security_result =
+                        ble_gap_security_initiate(connection);
+                    if(security_result != 0)
                     {
+                        set_phase(link_phase::failed, security_result);
                         ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
                     }
                     break;
+                }
 
                 case BLE_GAP_EVENT_ENC_CHANGE:
                     if(event->enc_change.status == 0)
                     {
-                        if(ble_gattc_disc_svc_by_uuid(connection,
-                            &HID_SERVICE.u, service_found, nullptr) == 0)
+                        set_phase(link_phase::discovering);
+                        const int32_t result = ble_gattc_disc_svc_by_uuid(
+                            connection, &HID_SERVICE.u, service_found, nullptr);
+                        if(result == 0)
                         {
                             break;
                         }
+                        set_phase(link_phase::failed, result);
                     }
+                    else{set_phase(link_phase::failed, event->enc_change.status);}
                     ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
                     break;
 
@@ -523,11 +609,21 @@ namespace gamepad
                     break;
 
                 case BLE_GAP_EVENT_DISCONNECT:
+                {
+                    portENTER_CRITICAL(&state_lock);
+                    const bool failed = phase == link_phase::failed;
+                    portEXIT_CRITICAL(&state_lock);
+                    if(!failed)
+                    {
+                        set_phase(link_phase::failed,
+                            event->disconnect.reason);
+                    }
                     connecting = false;
                     connection = UINT16_MAX;
                     disconnect();
                     scan();
                     break;
+                }
 
                 case BLE_GAP_EVENT_DISC_COMPLETE:
                     if(manual_scan){manual_scan = false;}
@@ -647,6 +743,9 @@ namespace gamepad
         if(target_set){address_text(target, snapshot.target);}
         snapshot.scanning = manual_scan || manual_scan_pending;
         snapshot.scan_error = scan_error;
+        snapshot.phase = phase;
+        snapshot.failed_at = failed_at;
+        snapshot.link_error = link_error;
         portEXIT_CRITICAL(&state_lock);
         return snapshot;
     }
@@ -674,6 +773,9 @@ namespace gamepad
         portENTER_CRITICAL(&state_lock);
         target = selected;
         target_set = true;
+        phase = link_phase::searching;
+        failed_at = link_phase::searching;
+        link_error = 0;
         command = 2;
         portEXIT_CRITICAL(&state_lock);
         ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &command_event);

@@ -40,6 +40,18 @@ namespace gamepad
         char name[32] = {};
         int8_t rssi = 0;
         bool xbox = false;
+        bool connectable = false;
+    };
+
+    enum class link_phase : uint8_t
+    {
+        searching,
+        connecting,
+        pairing,
+        discovering,
+        subscribing,
+        ready,
+        failed
     };
 
     struct discovery
@@ -47,6 +59,9 @@ namespace gamepad
         char target[18] = {};
         bool scanning = false;
         int32_t scan_error = 0;
+        link_phase phase = link_phase::searching;
+        link_phase failed_at = link_phase::searching;
+        int32_t link_error = 0;
     };
 
     bool init();
