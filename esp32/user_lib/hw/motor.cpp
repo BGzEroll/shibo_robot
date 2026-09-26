@@ -66,7 +66,7 @@ namespace motor
         bool started = false;
 
         /**
-         * @brief 每个 PWM 周期唤醒一次 FOC 任务
+         * @brief 每两个 PWM 周期唤醒一次 FOC 任务
          *
          * @return true 已唤醒高优先级任务
          * @return false 未唤醒高优先级任务
@@ -74,7 +74,9 @@ namespace motor
         bool on_pwm_empty(mcpwm_timer_handle_t,
             const mcpwm_timer_event_data_t *, void *)
         {
-            if(task_handle == nullptr){return false;}
+            static bool wake = false;
+            wake = !wake;
+            if(!wake || task_handle == nullptr){return false;}
 
             BaseType_t task_woken = pdFALSE;
             vTaskNotifyGiveFromISR(task_handle, &task_woken);

@@ -31,8 +31,8 @@ namespace test
             while(true)
             {
                 // motor::set_target(LEFT_TORQUE_MNM, 0, true);
-                // motor::set_target(0, LEFT_TORQUE_MNM, true);
-                motor::set_target(0, 0, false);
+                motor::set_target(0, LEFT_TORQUE_MNM, true);
+                // motor::set_target(0, 0, false);
                 elapsed_ms += COMMAND_PERIOD_MS;
 
                 if(elapsed_ms >= PRINT_PERIOD_MS)
