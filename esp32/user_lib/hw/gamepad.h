@@ -34,8 +34,24 @@ namespace gamepad
         bool connected = false;
     };
 
+    struct device
+    {
+        char address[18] = {};
+        int8_t rssi = 0;
+    };
+
+    struct discovery
+    {
+        char target[18] = {};
+        bool scanning = false;
+    };
+
     bool init();
     bool get_state(state &out);
+    bool scan_devices();
+    uint8_t get_devices(device *out, uint8_t capacity);
+    discovery get_discovery();
+    bool select_device(uint8_t index);
 }
 
 #endif

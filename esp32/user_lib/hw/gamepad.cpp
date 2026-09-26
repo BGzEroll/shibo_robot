@@ -5,9 +5,11 @@
 #include "host/ble_hs.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
-#include "nvs_flash.h"
+#include "nvs.h"
 
 #include <string.h>
+#include <stdio.h>
+#include <atomic>
 
 extern "C" void ble_store_config_init(void);
 
@@ -16,6 +18,7 @@ namespace gamepad
     namespace
     {
         constexpr uint8_t MAX_REPORTS = 8;
+        constexpr uint8_t MAX_DEVICES = 8;
         constexpr ble_uuid16_t HID_SERVICE = BLE_UUID16_INIT(0x1812);
 
         struct report
@@ -35,6 +38,26 @@ namespace gamepad
         uint8_t own_address_type = 0;
         bool connecting = false;
         bool started = false;
+        std::atomic<bool> host_ready{false};
+        std::atomic<bool> manual_scan{false};
+        std::atomic<bool> manual_scan_pending{false};
+        bool target_set = false;
+        ble_addr_t target = {};
+        ble_addr_t discovered_addresses[MAX_DEVICES] = {};
+        device discovered[MAX_DEVICES];
+        uint8_t discovered_count = 0;
+        ble_npl_event command_event;
+        uint8_t command = 0;
+
+        /**
+         * @brief 将 BLE 地址格式化为显示字符串
+         */
+        void address_text(const ble_addr_t &address, char *out)
+        {
+            snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X",
+                address.val[5], address.val[4], address.val[3],
+                address.val[2], address.val[1], address.val[0]);
+        }
 
         int gap_event(ble_gap_event *event, void *);
 
@@ -43,7 +66,8 @@ namespace gamepad
          */
         void scan()
         {
-            if(connecting || connection != UINT16_MAX){return;}
+            if(connecting || connection != UINT16_MAX || manual_scan ||
+                manual_scan_pending){return;}
             ble_gap_disc_params params = {};
             params.passive = 0;
             params.filter_duplicates = 0;
@@ -295,6 +319,47 @@ namespace gamepad
         }
 
         /**
+         * @brief 在 NimBLE 主机任务中执行网页发来的扫描或切换
+         */
+        void handle_command(ble_npl_event *)
+        {
+            uint8_t next;
+            portENTER_CRITICAL(&state_lock);
+            next = command;
+            command = 0;
+            portEXIT_CRITICAL(&state_lock);
+            if(next == 1)
+            {
+                manual_scan_pending = true;
+                if(ble_gap_disc_active()){ble_gap_disc_cancel();}
+                else
+                {
+                    manual_scan_pending = false;
+                    manual_scan = true;
+                    ble_gap_disc_params params = {};
+                    params.passive = 0;
+                    params.filter_duplicates = 1;
+                    if(ble_gap_disc(own_address_type, 5000, &params,
+                        gap_event, nullptr) != 0)
+                    {
+                        manual_scan = false;
+                    }
+                }
+            }
+            else if(next == 2)
+            {
+                manual_scan = false;
+                manual_scan_pending = false;
+                if(ble_gap_disc_active()){ble_gap_disc_cancel();}
+                if(connection != UINT16_MAX)
+                {
+                    ble_gap_terminate(connection, BLE_ERR_REM_USER_CONN_TERM);
+                }
+                else{scan();}
+            }
+        }
+
+        /**
          * @brief 处理 BLE 连接、配对与输入通知
          */
         int gap_event(ble_gap_event *event, void *)
@@ -305,6 +370,35 @@ namespace gamepad
                     if(is_xbox(event->disc))
                     {
                         const ble_addr_t address = event->disc.addr;
+                        if(manual_scan)
+                        {
+                            portENTER_CRITICAL(&state_lock);
+                            uint8_t index = 0;
+                            while(index < discovered_count &&
+                                memcmp(&discovered_addresses[index], &address,
+                                    sizeof(address)) != 0)
+                            {
+                                index++;
+                            }
+                            if(index == discovered_count && index < MAX_DEVICES)
+                            {
+                                discovered_addresses[index] = address;
+                                address_text(address, discovered[index].address);
+                                discovered[index].rssi = event->disc.rssi;
+                                discovered_count++;
+                            }
+                            portEXIT_CRITICAL(&state_lock);
+                            break;
+                        }
+                        portENTER_CRITICAL(&state_lock);
+                        const bool selected = target_set;
+                        const ble_addr_t selected_address = target;
+                        portEXIT_CRITICAL(&state_lock);
+                        if(selected && memcmp(&selected_address, &address,
+                            sizeof(address)) != 0)
+                        {
+                            break;
+                        }
                         connecting = true;
                         ble_gap_disc_cancel();
                         if(ble_gap_connect(own_address_type, &address, 10000,
@@ -405,6 +499,21 @@ namespace gamepad
                     break;
 
                 case BLE_GAP_EVENT_DISC_COMPLETE:
+                    if(manual_scan_pending)
+                    {
+                        manual_scan_pending = false;
+                        manual_scan = true;
+                        ble_gap_disc_params params = {};
+                        params.passive = 0;
+                        params.filter_duplicates = 1;
+                        if(ble_gap_disc(own_address_type, 5000, &params,
+                            gap_event, nullptr) != 0)
+                        {
+                            manual_scan = false;
+                        }
+                        break;
+                    }
+                    if(manual_scan){manual_scan = false;}
                     if(!connecting){scan();}
                     break;
             }
@@ -416,7 +525,11 @@ namespace gamepad
          */
         void sync()
         {
-            if(ble_hs_id_infer_auto(0, &own_address_type) == 0){scan();}
+            if(ble_hs_id_infer_auto(0, &own_address_type) == 0)
+            {
+                host_ready = true;
+                scan();
+            }
         }
 
         /**
@@ -437,7 +550,7 @@ namespace gamepad
     bool init()
     {
         if(started){return true;}
-        if(nvs_flash_init() != ESP_OK || nimble_port_init() != ESP_OK)
+        if(nimble_port_init() != ESP_OK)
         {
             return false;
         }
@@ -449,6 +562,15 @@ namespace gamepad
         ble_hs_cfg.sm_sc = 0;
         ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
         ble_store_config_init();
+        nvs_handle_t storage;
+        if(nvs_open("gamepad", NVS_READONLY, &storage) == ESP_OK)
+        {
+            size_t size = sizeof(target);
+            target_set = nvs_get_blob(storage, "target", &target,
+                &size) == ESP_OK && size == sizeof(target);
+            nvs_close(storage);
+        }
+        ble_npl_event_init(&command_event, handle_command, nullptr);
         nimble_port_freertos_init(host_task);
         started = true;
         return true;
@@ -467,5 +589,74 @@ namespace gamepad
         out = latest_state;
         portEXIT_CRITICAL(&state_lock);
         return out.connected && out.timestamp_us != 0;
+    }
+
+    /**
+     * @brief 开始五秒手柄扫描
+     */
+    bool scan_devices()
+    {
+        if(!started || !host_ready){return false;}
+        portENTER_CRITICAL(&state_lock);
+        discovered_count = 0;
+        command = 1;
+        portEXIT_CRITICAL(&state_lock);
+        ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &command_event);
+        return true;
+    }
+
+    /**
+     * @brief 复制手柄扫描结果
+     */
+    uint8_t get_devices(device *out, uint8_t capacity)
+    {
+        portENTER_CRITICAL(&state_lock);
+        const uint8_t count = discovered_count < capacity ?
+            discovered_count : capacity;
+        memcpy(out, discovered, count * sizeof(device));
+        portEXIT_CRITICAL(&state_lock);
+        return count;
+    }
+
+    /**
+     * @brief 获取目标手柄和扫描状态
+     */
+    discovery get_discovery()
+    {
+        discovery snapshot;
+        portENTER_CRITICAL(&state_lock);
+        if(target_set){address_text(target, snapshot.target);}
+        snapshot.scanning = manual_scan || manual_scan_pending;
+        portEXIT_CRITICAL(&state_lock);
+        return snapshot;
+    }
+
+    /**
+     * @brief 保存扫描列表中的手柄为连接目标
+     */
+    bool select_device(uint8_t index)
+    {
+        ble_addr_t selected;
+        portENTER_CRITICAL(&state_lock);
+        const bool found = index < discovered_count;
+        if(found){selected = discovered_addresses[index];}
+        portEXIT_CRITICAL(&state_lock);
+        if(!found){return false;}
+        nvs_handle_t storage;
+        if(nvs_open("gamepad", NVS_READWRITE, &storage) != ESP_OK)
+        {
+            return false;
+        }
+        const bool saved = nvs_set_blob(storage, "target", &selected,
+            sizeof(selected)) == ESP_OK && nvs_commit(storage) == ESP_OK;
+        nvs_close(storage);
+        if(!saved){return false;}
+        portENTER_CRITICAL(&state_lock);
+        target = selected;
+        target_set = true;
+        command = 2;
+        portEXIT_CRITICAL(&state_lock);
+        ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &command_event);
+        return true;
     }
 }

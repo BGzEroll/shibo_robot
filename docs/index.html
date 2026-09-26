@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Shibo 设置</title>
+    <style>
+        :root{font:16px/1.5 system-ui,sans-serif;color:#18212b;background:#f5f7f9}
+        *{box-sizing:border-box}
+        body{max-width:760px;margin:0 auto;padding:24px 16px 56px}
+        h1{font-size:1.7rem;margin:0 0 4px}h2{font-size:1.1rem;margin:0 0 12px}
+        p{margin:6px 0;color:#52616f}section{background:white;border:1px solid #dce3e9;border-radius:12px;padding:20px;margin-top:18px}
+        label{display:block;font-weight:600;margin:14px 0 6px}
+        input,button{font:inherit;border-radius:8px;padding:9px 12px}
+        input{width:100%;border:1px solid #aebbc7;background:white}
+        button{border:1px solid #bac6d0;background:#f7f9fb;color:#18212b;cursor:pointer}
+        button.primary{background:#1769aa;color:white;border-color:#1769aa}
+        button:disabled{opacity:.55;cursor:wait}
+        .row{display:flex;gap:8px;align-items:center;margin-top:14px}.row>*{flex:1}
+        ul{list-style:none;padding:0;margin:12px 0 0}li{display:flex;gap:12px;align-items:center;justify-content:space-between;border-top:1px solid #e6ebef;padding:10px 0}
+        li span{overflow-wrap:anywhere}.small{font-size:.87rem;color:#667784}#message{min-height:24px}
+        @media(max-width:500px){li{align-items:flex-start;flex-direction:column}.row{flex-direction:column;align-items:stretch}}
+    </style>
+</head>
+<body>
+    <h1>Shibo 设置</h1>
+    <p>配置机器人网络和 Xbox 手柄。</p>
+
+    <section>
+        <h2>连接</h2>
+        <label for="backend">后端地址</label>
+        <div class="row"><input id="backend" type="url" placeholder="http://192.168.4.1"><button id="save-backend">保存并连接</button></div>
+        <p class="small">连接机器人热点时可填 http://192.168.4.1；连接家庭 Wi‑Fi 时填机器人获得的地址。</p>
+        <p id="message" role="status"></p>
+    </section>
+
+    <section>
+        <h2>Wi‑Fi</h2>
+        <p id="wifi-status">尚未读取状态</p>
+        <button id="wifi-scan">扫描附近网络</button>
+        <ul id="wifi-list"></ul>
+        <form id="wifi-form">
+            <label for="ssid">目标 SSID</label><input id="ssid" maxlength="32" required>
+            <label for="password">密码</label><input id="password" type="password" maxlength="64" autocomplete="new-password">
+            <div class="row"><button class="primary">保存并连接</button></div>
+        </form>
+    </section>
+
+    <section>
+        <h2>Xbox 手柄</h2>
+        <p id="gamepad-status">尚未读取状态</p>
+        <button id="gamepad-scan">扫描手柄（5 秒）</button>
+        <ul id="gamepad-list"></ul>
+    </section>
+
+    <script>
+        const $ = id => document.getElementById(id);
+        const local = !location.hostname.endsWith('github.io');
+        let backend = local ? location.origin : localStorage.getItem('shibo-backend') || 'http://192.168.4.1';
+        $('backend').value = backend;
+
+        function message(text){$('message').textContent = text}
+
+        async function api(path, options = {}){
+            const response = await fetch(backend + path, options);
+            if(!response.ok) throw new Error(`请求失败：HTTP ${response.status}`);
+            return response.json();
+        }
+
+        async function status(){
+            try{
+                const data = await api('/api/status');
+                $('wifi-status').textContent = data.wifi.connected
+                    ? `已连接 ${data.wifi.ssid} · ${data.wifi.ip}`
+                    : data.wifi.ap ? '配置热点已开启' : `正在连接 ${data.wifi.ssid || '网络'}`;
+                $('gamepad-status').textContent = data.gamepad.connected
+                    ? `已连接 · 目标 ${data.gamepad.target || '自动选择'}`
+                    : `未连接 · 目标 ${data.gamepad.target || '自动选择'}`;
+                message('后端已连接');
+            }catch(error){message(`无法连接 ${backend}：${error.message}`)}
+        }
+
+        $('save-backend').onclick = () => {
+            backend = $('backend').value.trim().replace(/\/+$/, '');
+            if(!backend.startsWith('http://') && !backend.startsWith('https://')){
+                message('请输入完整的 http:// 或 https:// 地址');
+                return;
+            }
+            if(!local) localStorage.setItem('shibo-backend', backend);
+            status();
+        };
+
+        async function poll(path, render){
+            for(let i = 0; i < 20; i++){
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const data = await api(path);
+                if(!data.scanning){render(data);return}
+            }
+            throw new Error('扫描超时');
+        }
+
+        $('wifi-scan').onclick = async () => {
+            const button = $('wifi-scan');button.disabled = true;
+            try{
+                await api('/api/wifi/scan', {method:'POST'});
+                await poll('/api/wifi/networks', data => {
+                    $('wifi-list').replaceChildren(...data.networks.map(network => {
+                        const row = document.createElement('li');
+                        const name = document.createElement('span');
+                        name.textContent = `${network.ssid || '隐藏网络'} · ${network.rssi} dBm${network.secured ? ' · 加密' : ''}`;
+                        const select = document.createElement('button');
+                        select.textContent = '选择';
+                        select.onclick = () => $('ssid').value = network.ssid;
+                        row.append(name, select);
+                        return row;
+                    }));
+                });
+            }catch(error){message(error.message)}finally{button.disabled = false}
+        };
+
+        $('wifi-form').onsubmit = async event => {
+            event.preventDefault();
+            try{
+                await api('/api/wifi/connect', {method:'POST', headers:{'Content-Type':'application/json'},
+                    body:JSON.stringify({ssid:$('ssid').value, password:$('password').value})});
+                $('password').value = '';
+                message('连接已开始；切换网络后可能需要更新后端地址');
+                setTimeout(status, 3000);
+            }catch(error){message(error.message)}
+        };
+
+        $('gamepad-scan').onclick = async () => {
+            const button = $('gamepad-scan');button.disabled = true;
+            try{
+                await api('/api/gamepad/scan', {method:'POST'});
+                await poll('/api/gamepad/devices', data => {
+                    $('gamepad-list').replaceChildren(...data.devices.map(device => {
+                        const row = document.createElement('li');
+                        const name = document.createElement('span');
+                        name.textContent = `${device.address} · ${device.rssi} dBm`;
+                        const select = document.createElement('button');
+                        select.textContent = '连接';
+                        select.onclick = async () => {
+                            try{
+                                await api('/api/gamepad/target', {method:'POST', headers:{'Content-Type':'application/json'},
+                                    body:JSON.stringify({index:device.index})});
+                                message(`已选择 ${device.address}，正在连接`);
+                                status();
+                            }catch(error){message(error.message)}
+                        };
+                        row.append(name, select);
+                        return row;
+                    }));
+                });
+            }catch(error){message(error.message)}finally{button.disabled = false}
+        };
+
+        if('serviceWorker' in navigator && location.protocol === 'https:'){
+            navigator.serviceWorker.register('./sw.js').catch(() => {});
+        }
+        status();
+    </script>
+</body>
+</html>
