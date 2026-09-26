@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <algorithm>
 #include <math.h>
 #include <stdint.h>
 
@@ -14,7 +15,7 @@ namespace control
 {
     namespace
     {
-        constexpr uint32_t PERIOD_MS = 2;
+        constexpr uint32_t PERIOD_MS = 1;
         constexpr uint64_t ENCODER_TIMEOUT_US = 5000;
         constexpr uint64_t IMU_TIMEOUT_US = 15000;
         constexpr float ARM_PITCH_RAD = 0.15f;
@@ -56,7 +57,9 @@ namespace control
             {
                 sensor::package snapshot;
                 const bool imu_ready = sensor::get_package(snapshot);
+
                 const uint64_t now_us = sys_time::get_us_tick();
+
                 const bool fresh = imu_ready &&
                     snapshot.left_encoder.timestamp_us != 0 &&
                     snapshot.right_encoder.timestamp_us != 0 &&
@@ -75,9 +78,14 @@ namespace control
                         snapshot.left_encoder.speed_mrad_s +
                     static_cast<float>(motor_directions.right) *
                         snapshot.right_encoder.speed_mrad_s) *
-                    0.0005f * settings.wheel_radius_m;
-                const bool valid = fresh && isfinite(pitch) &&
-                    isfinite(pitch_rate) && isfinite(yaw_rate) &&
+                    0.001f *
+                    0.5f *
+                    settings.wheel_radius_m;
+
+                const bool valid = fresh &&
+                    isfinite(pitch) &&
+                    isfinite(pitch_rate)&&
+                    isfinite(yaw_rate) &&
                     isfinite(speed);
 
                 if(engaged && (!valid || fabsf(pitch) > TRIP_PITCH_RAD))
@@ -104,11 +112,17 @@ namespace control
                 else
                 {
                     const balance::output torque = balance::step(
-                        settings.model_height_m, pitch, pitch_rate, speed, yaw_rate,
+                        settings.model_height_m,
+                        pitch,
+                        pitch_rate,
+                        speed,
+                        yaw_rate,
                         PERIOD_MS * 0.001f);
+
                     const float temporary_scale = 0.1f * (2.0f / 3.0f); // q_test 临时缩放
                     const float left_mNm = torque.left_nm * temporary_scale * 1000.0f;
                     const float right_mNm = torque.right_nm * temporary_scale * 1000.0f;
+
                     if(!isfinite(left_mNm) || !isfinite(right_mNm))
                     {
                         engaged = false;
@@ -118,13 +132,15 @@ namespace control
                     }
                     else
                     {
-                        const float left_limited = fmaxf(-settings.max_torque_mNm,
-                            fminf(settings.max_torque_mNm, left_mNm));
-                        const float right_limited = fmaxf(-settings.max_torque_mNm,
-                            fminf(settings.max_torque_mNm, right_mNm));
+                        const float left_limited = std::clamp(left_mNm,
+                            -settings.max_torque_mNm, settings.max_torque_mNm);
+                        const float right_limited = std::clamp(right_mNm,
+                            -settings.max_torque_mNm, settings.max_torque_mNm);
+
                         motor::set_target(
                             static_cast<int32_t>(roundf(left_limited)),
-                            static_cast<int32_t>(roundf(right_limited)), true);
+                            static_cast<int32_t>(roundf(right_limited)),
+                            true);
                     }
                 }
 
@@ -152,6 +168,7 @@ namespace control
     bool init()
     {
         if(started){return true;}
+
         motor::set_target(0, 0, false);
         motor_directions = motor::get_directions();
         if(motor_directions.left == 0 || motor_directions.right == 0)
@@ -162,8 +179,14 @@ namespace control
 
         balance::init(settings);
 
-        if(xTaskCreatePinnedToCore(task, "control", 4096, nullptr, 4,
-                nullptr, 0) != pdPASS)
+        if(xTaskCreatePinnedToCore(
+            task,
+            "control",
+            4096,
+            nullptr,
+            4,
+            nullptr,
+            0) != pdPASS)
         {
             publish_status({arm_state::init_failed});
             return false;
