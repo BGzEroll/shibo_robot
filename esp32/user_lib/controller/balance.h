@@ -36,7 +36,6 @@ namespace balance
         float model_height_m = 0.048f;
         float linear_integral_limit_m = 2.28f;
         float yaw_integral_limit_rad = 0.55f;
-        float torque_scale = 0.1f;
         float max_torque_mNm = 30.0f;
     };
 

@@ -63,12 +63,13 @@ namespace balance
      * @param[in] yaw_rate_rad_s 偏航角速度，单位 rad/s
      * @param[in] dt_s 控制周期，单位 s
      *
-     * @return 左右轮目标力矩，单位 N·m
+     * @return 左右轮原始目标力矩，单位 N·m
      */
     output step(float height_m, float pitch_rad, float pitch_rate_rad_s,
         float linear_speed_m_s, float yaw_rate_rad_s, float dt_s)
     {
         update_gain(height_m);
+        
         update_gain(0.048f);    // 调试用固定高度，正式启用高度反馈时删除此行。
 
         linear_integral_m -= linear_speed_m_s * dt_s;
@@ -84,14 +85,15 @@ namespace balance
             pitch_rad, pitch_rate_rad_s, linear_speed_m_s,
             yaw_rate_rad_s, linear_integral_m, yaw_integral_rad
         };
+
         float torque[2] = {};
+
         for(uint32_t side = 0; side < 2; side++)
         {
             for(uint32_t i = 0; i < 6; i++)
             {
                 torque[side] += gain[side][i] * feedback[i];
             }
-            torque[side] *= settings.torque_scale;
         }
         return {torque[0], torque[1]};
     }

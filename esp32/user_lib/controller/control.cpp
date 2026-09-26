@@ -106,10 +106,9 @@ namespace control
                     const balance::output torque = balance::step(
                         settings.model_height_m, pitch, pitch_rate, speed, yaw_rate,
                         PERIOD_MS * 0.001f);
-                    const float left_mNm = torque.left_nm * 1000.0f *
-                        (2.0f / 3.0f);       // lqi 参数不太能匹配上，临时直接调整输出，之后再调
-                    const float right_mNm = torque.right_nm * 1000.0f *
-                        (2.0f / 3.0f);
+                    const float temporary_scale = 0.1f * (2.0f / 3.0f); // q_test 临时缩放
+                    const float left_mNm = torque.left_nm * temporary_scale * 1000.0f;
+                    const float right_mNm = torque.right_nm * temporary_scale * 1000.0f;
                     if(!isfinite(left_mNm) || !isfinite(right_mNm))
                     {
                         engaged = false;
