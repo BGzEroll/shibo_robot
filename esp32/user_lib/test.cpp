@@ -1,5 +1,6 @@
 #include "test.h"
 
+#include "hw/motor.h"
 #include "hw/sensor.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -12,47 +13,43 @@ namespace test
     namespace
     {
         constexpr const char *TAG = "test";
+        constexpr uint32_t COMMAND_PERIOD_MS = 10;
         constexpr uint32_t PRINT_PERIOD_MS = 100;
+        constexpr int32_t LEFT_TORQUE_MNM = static_cast<int32_t>(0.025f * 1000.0f);
 
         void task(void *)
         {
             sensor::package snapshot{};
+            TickType_t last_wake = xTaskGetTickCount();
+            uint32_t elapsed_ms = 0;
 
             while(true)
             {
-                if(sensor::get_package(snapshot))
+                // motor::set_target(LEFT_TORQUE_MNM, 0, true);
+                // motor::set_target(0, LEFT_TORQUE_MNM, true);
+                motor::set_target(0, 0, false);
+                elapsed_ms += COMMAND_PERIOD_MS;
+
+                if(elapsed_ms >= PRINT_PERIOD_MS)
                 {
+                    elapsed_ms = 0;
+                    sensor::get_package(snapshot);
                     ESP_LOGI(
                         TAG,
                         "\033[H"
-                        "==================== SENSOR ====================\n"
-                        "LEFT  ts=%12" PRIu64 " us  count=%+10" PRId32 "  speed=%+8" PRId32 " mrad/s\n"
-                        "RIGHT ts=%12" PRIu64 " us  count=%+10" PRId32 "  speed=%+8" PRId32 " mrad/s\n"
-                        "IMU   ts=%12" PRIu64 " us  temp=%+7.2f C\n"
-                        "ACC   x=%+8.3f  y=%+8.3f  z=%+8.3f\n"
-                        "GYRO  x=%+8.3f  y=%+8.3f  z=%+8.3f\n"
-                        "ANGLE x=%+8.3f  y=%+8.3f  z=%+8.3f\n"
-                        "=================================================\033[J",
+                        "REQ L=%+4" PRId32 " mNm R=OFF\n"
+                        "L t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
+                        "R t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\033[J",
+                        LEFT_TORQUE_MNM,
                         snapshot.left_encoder.timestamp_us,
                         snapshot.left_encoder.full_count,
                         snapshot.left_encoder.speed_mrad_s,
                         snapshot.right_encoder.timestamp_us,
                         snapshot.right_encoder.full_count,
-                        snapshot.right_encoder.speed_mrad_s,
-                        snapshot.imu.timestamp_us,
-                        snapshot.imu.temperature,
-                        snapshot.imu.acc[0],
-                        snapshot.imu.acc[1],
-                        snapshot.imu.acc[2],
-                        snapshot.imu.gyro[0],
-                        snapshot.imu.gyro[1],
-                        snapshot.imu.gyro[2],
-                        snapshot.imu.angle[0],
-                        snapshot.imu.angle[1],
-                        snapshot.imu.angle[2]);
+                        snapshot.right_encoder.speed_mrad_s);
                 }
 
-                vTaskDelay(pdMS_TO_TICKS(PRINT_PERIOD_MS));
+                vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(COMMAND_PERIOD_MS));
             }
         }
     }
@@ -65,8 +62,8 @@ namespace test
 
         if(xTaskCreatePinnedToCore(
             task,
-            "sensor_print",
-            8192,
+            "motor_test",
+            4096,
             nullptr,
             4,
             nullptr,

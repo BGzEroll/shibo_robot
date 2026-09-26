@@ -26,7 +26,7 @@ namespace motor
         constexpr double PHASE_RESISTANCE = 12.27166;
         constexpr double KT_KE = 0.0796;
         constexpr double BUS_VOLTAGE = 7.4;
-        constexpr float ALIGNMENT_VOLTAGE = 1.7f;
+        constexpr float ALIGNMENT_VOLTAGE = 3.0f;
         constexpr int32_t ALIGNMENT_UQ = static_cast<int32_t>(
             ALIGNMENT_VOLTAGE / BUS_VOLTAGE * Q15_ONE + 0.5);
         constexpr int32_t TORQUE_GAIN_Q10 = static_cast<int32_t>(
