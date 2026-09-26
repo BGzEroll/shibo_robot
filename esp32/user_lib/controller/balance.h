@@ -15,7 +15,6 @@ namespace balance
         };
         float wheel_radius_m = 0.0263f;
         float model_height_m = 0.048f;
-        float speed_filter_tau_s = 0.008f;
         float linear_integral_limit_m = 2.28f;
         float torque_scale = 0.1f;
         float max_torque_mNm = 30.0f;

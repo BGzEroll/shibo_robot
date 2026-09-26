@@ -9,9 +9,7 @@ namespace balance
     {
         config settings;
         float gain[4] = {};
-        float filtered_speed_m_s = 0.0f;
         float linear_integral_m = 0.0f;
-        bool first_sample = true;
     }
 
     /**
@@ -34,13 +32,11 @@ namespace balance
     }
 
     /**
-     * @brief 清空平衡滤波与积分状态
+     * @brief 清空线速度误差积分
      */
     void reset()
     {
-        filtered_speed_m_s = 0.0f;
         linear_integral_m = 0.0f;
-        first_sample = true;
     }
 
     /**
@@ -56,24 +52,13 @@ namespace balance
     float step(float pitch_rad, float pitch_rate_rad_s,
         float linear_speed_m_s, float dt_s)
     {
-        if(first_sample)
-        {
-            filtered_speed_m_s = linear_speed_m_s;
-            first_sample = false;
-        }
-        else
-        {
-            filtered_speed_m_s += (linear_speed_m_s - filtered_speed_m_s) *
-                dt_s / (settings.speed_filter_tau_s + dt_s);
-        }
-
-        linear_integral_m -= filtered_speed_m_s * dt_s;
+        linear_integral_m -= linear_speed_m_s * dt_s;
         linear_integral_m = fmaxf(-settings.linear_integral_limit_m,
             fminf(settings.linear_integral_limit_m, linear_integral_m));
 
         return (gain[0] * pitch_rad +
                 gain[1] * pitch_rate_rad_s +
-                gain[2] * filtered_speed_m_s +
+                gain[2] * linear_speed_m_s +
                 gain[3] * linear_integral_m) * settings.torque_scale;
     }
 }

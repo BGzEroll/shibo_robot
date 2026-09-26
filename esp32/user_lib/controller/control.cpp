@@ -102,7 +102,7 @@ namespace control
                 else
                 {
                     const float torque_mNm = balance::step(pitch, pitch_rate,
-                        speed, PERIOD_MS * 0.001f) * 1000.0f;
+                        speed, PERIOD_MS * 0.001f) * 1000.0f * (2.0f / 3.0f);       // lqi 参数不太能匹配上，临时直接调整输出，之后再调
                     if(!isfinite(torque_mNm))
                     {
                         engaged = false;
