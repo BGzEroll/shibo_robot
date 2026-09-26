@@ -1,4 +1,4 @@
-#include "servo.h"
+#include "leg_servo.h"
 
 #include "sys_time.h"
 #include "driver/uart.h"
@@ -95,7 +95,7 @@ namespace uart
     }
 }
 
-namespace servo
+namespace leg_servo
 {
     namespace
     {
@@ -104,7 +104,9 @@ namespace servo
         constexpr uint8_t BROADCAST_ID = 0xFE;
         constexpr uint8_t SYNC_READ = 0x82;
         constexpr uint8_t SYNC_WRITE = 0x83;
+        constexpr uint8_t WRITE = 0x03;
         constexpr uint8_t TORQUE_ENABLE = 40;
+        constexpr uint8_t MIDDLE_CALIBRATION = 128;
         constexpr uint8_t ACCELERATION = 41;
         constexpr uint8_t PRESENT_POSITION = 56;
         constexpr uint8_t FEEDBACK_SIZE = 15;
@@ -329,6 +331,31 @@ namespace servo
             LEFT_ID, static_cast<uint8_t>(left_enabled),
             RIGHT_ID, static_cast<uint8_t>(right_enabled),
             0
+        };
+        return send(frame, sizeof(frame));
+    }
+
+    /**
+     * @brief 将指定腿舵机当前机械位置校准为中位
+     *
+     * @param[in] target 左侧或右侧舵机
+     *
+     * @return true 校准命令已发送
+     * @return false UART 未初始化、参数无效或发送失败
+     */
+    bool calibrate_middle(side target)
+    {
+        if(!uart::ready()){return false;}
+
+        uint8_t id = 0;
+        if(target == side::left){id = LEFT_ID;}
+        else if(target == side::right){id = RIGHT_ID;}
+        else{return false;}
+
+        uint8_t frame[8] =
+        {
+            0xFF, 0xFF, id, 4, WRITE,
+            TORQUE_ENABLE, MIDDLE_CALIBRATION, 0
         };
         return send(frame, sizeof(frame));
     }

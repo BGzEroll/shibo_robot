@@ -1,6 +1,6 @@
 #include "hw/motor.h"
 #include "hw/sensor.h"
-#include "hw/servo.h"
+#include "hw/leg_servo.h"
 #include "test.h"
 
 /**
@@ -13,7 +13,7 @@ extern "C" void app_init(void)
         motor::init();
     }
 
-    servo::init();
+    leg_servo::init();
 
     test::init();
 }

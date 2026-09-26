@@ -1,10 +1,16 @@
-#ifndef SERVO_H
-#define SERVO_H
+#ifndef LEG_SERVO_H
+#define LEG_SERVO_H
 
 #include <stdint.h>
 
-namespace servo
+namespace leg_servo
 {
+    enum class side : uint8_t
+    {
+        left,
+        right
+    };
+
     struct command
     {
         int16_t position = 0;
@@ -30,6 +36,7 @@ namespace servo
     bool set_target(const command &left, const command &right);
     bool read_feedback(state &left, state &right);
     bool set_torque(bool left_enabled, bool right_enabled);
+    bool calibrate_middle(side target);
 }
 
 #endif
