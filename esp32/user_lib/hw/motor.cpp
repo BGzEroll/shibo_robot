@@ -516,6 +516,16 @@ namespace motor
     }
 
     /**
+     * @brief 获取校准后的左右编码器方向
+     *
+     * @return 左右编码器方向
+     */
+    directions get_directions()
+    {
+        return {left.direction, right.direction};
+    }
+
+    /**
      * @brief 提交左右电机力矩目标与使能状态
      *
      * @param[in] left_mNm 左电机目标力矩，单位 mN·m
