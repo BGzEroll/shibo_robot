@@ -11,30 +11,26 @@ namespace web
 {
     namespace
     {
-        constexpr char PAGE_ORIGIN[] = "https://bgzeroll.github.io";
-        constexpr char PORTAL[] = R"html(<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shibo 配网</title><style>body{font:16px system-ui;max-width:480px;margin:40px auto;padding:0 16px}input,button{font:inherit;padding:10px;margin:6px 0;width:100%;box-sizing:border-box}li{padding:8px;cursor:pointer}</style><h1>Shibo 配网</h1><p id="status">正在读取状态…</p><button onclick="scan()">扫描 Wi-Fi</button><ul id="networks"></ul><form id="form"><input name="ssid" placeholder="Wi-Fi 名称" required maxlength="32"><input name="password" type="password" placeholder="密码" maxlength="64"><button>保存并连接</button></form><script>const $=s=>document.querySelector(s);async function status(){let j=await(await fetch('/api/status')).json();$('#status').textContent=j.wifi.connected?'已连接 '+j.wifi.ssid+' · '+j.wifi.ip:j.wifi.ap?'配置热点已开启':'正在连接 '+j.wifi.ssid}async function scan(){await fetch('/api/wifi/scan',{method:'POST'});let t=setInterval(async()=>{let j=await(await fetch('/api/wifi/networks')).json();if(j.scanning)return;clearInterval(t);$('#networks').replaceChildren(...j.networks.map(n=>{let li=document.createElement('li');li.textContent=n.ssid+' ('+n.rssi+' dBm)';li.onclick=()=>$('#form').elements.ssid.value=n.ssid;return li}))},500)}$('#form').onsubmit=async e=>{e.preventDefault();let f=e.target;let r=await fetch('/api/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:f.elements.ssid.value,password:f.elements.password.value})});$('#status').textContent=r.ok?'已提交，正在连接':'连接请求失败';setTimeout(status,3000)};status()</script></html>)html";
-
-        /**
-         * @brief 只允许本项目 GitHub Pages 跨源访问
-         */
-        void cors(httpd_req_t *req)
-        {
-            char origin[80] = {};
-            if(httpd_req_get_hdr_value_str(req, "Origin", origin,
-                sizeof(origin)) == ESP_OK && strcmp(origin, PAGE_ORIGIN) == 0)
-            {
-                httpd_resp_set_hdr(req, "Access-Control-Allow-Origin",
-                    PAGE_ORIGIN);
-                httpd_resp_set_hdr(req, "Vary", "Origin");
-            }
-        }
+        constexpr char HOME[] = R"html(<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shibo Console</title><style>body{font:16px system-ui;max-width:560px;margin:40px auto;padding:0 20px}a{display:block;padding:18px;margin:16px 0;border:1px solid #bbb;border-radius:10px;color:inherit;text-decoration:none}</style><h1>Shibo Console</h1><a href="/wifi">Wi-Fi 设置</a><a href="/bluetooth">蓝牙设置</a></html>)html";
+        constexpr char WIFI_PAGE[] = R"html(<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wi-Fi 设置</title><style>body{font:16px system-ui;max-width:560px;margin:24px auto;padding:0 20px}button,input{font:inherit;padding:10px;margin:5px 0}input{width:95%}li{padding:8px 0}li button{margin-left:10px}</style><a href="/">← 首页</a><h1>Wi-Fi 设置</h1><p id="state">读取中…</p><button id="scan">扫描网络</button><ul id="list"></ul><form id="form"><input name="ssid" placeholder="SSID" required maxlength="32"><input name="password" type="password" placeholder="密码" maxlength="64"><button>保存并连接</button></form><p id="message"></p><script>
+const $=id=>document.getElementById(id);
+async function api(path,options){const r=await fetch(path,options);if(!r.ok)throw Error('HTTP '+r.status);return r.json()}
+async function status(){const d=await api('/api/status');$('state').textContent=d.wifi.connected?'已连接 '+d.wifi.ssid+' · '+d.wifi.ip:d.wifi.ap?'热点已开启 · '+(d.wifi.ssid||'未设置目标网络'):'正在连接 '+d.wifi.ssid}
+async function scan(){try{await api('/api/wifi/scan',{method:'POST'});for(let i=0;i<25;i++){await new Promise(r=>setTimeout(r,400));const d=await api('/api/wifi/networks');if(d.scanning)continue;$('list').replaceChildren(...d.networks.map(n=>{const li=document.createElement('li'),b=document.createElement('button');li.textContent=(n.ssid||'隐藏网络')+' · '+n.rssi+' dBm';b.textContent='选择';b.onclick=()=>$('form').elements.ssid.value=n.ssid;li.append(b);return li}));return}throw Error('扫描超时')}catch(e){$('message').textContent=e.message}}
+$('scan').onclick=scan;$('form').onsubmit=async e=>{e.preventDefault();try{const f=e.target;await api('/api/wifi/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ssid:f.elements.ssid.value,password:f.elements.password.value})});$('message').textContent='连接请求已提交';setTimeout(()=>status().catch(e=>$('message').textContent=e.message),3000)}catch(e){$('message').textContent=e.message}};status().catch(e=>$('message').textContent=e.message);
+</script></html>)html";
+        constexpr char BLUETOOTH_PAGE[] = R"html(<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>蓝牙设置</title><style>body{font:16px system-ui;max-width:560px;margin:24px auto;padding:0 20px}button{font:inherit;padding:10px;margin:5px}li{padding:8px 0}</style><a href="/">← 首页</a><h1>蓝牙手柄</h1><p id="state">读取中…</p><p>让手柄进入蓝牙配对模式后扫描。</p><button id="scan">扫描 5 秒</button><ul id="list"></ul><p id="message"></p><script>
+const $=id=>document.getElementById(id);
+async function api(path,options){const r=await fetch(path,options);if(!r.ok)throw Error('HTTP '+r.status);return r.json()}
+async function status(){const d=await api('/api/status');$('state').textContent=(d.gamepad.connected?'已连接':'未连接')+' · 目标 '+(d.gamepad.target||'自动搜索 Xbox')}
+$('scan').onclick=async()=>{try{await api('/api/gamepad/scan',{method:'POST'});for(let i=0;i<25;i++){await new Promise(r=>setTimeout(r,400));const d=await api('/api/gamepad/devices');if(d.scanning)continue;if(d.error)throw Error('BLE 扫描失败：'+d.error);$('list').replaceChildren(...d.devices.map(n=>{const li=document.createElement('li'),b=document.createElement('button');li.textContent=(n.name||'未命名设备')+' · '+n.address+' · '+n.rssi+' dBm'+(n.xbox?' · Xbox':'');b.textContent='连接';b.onclick=async()=>{try{await api('/api/gamepad/target',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:n.index})});$('message').textContent='已选择目标，等待连接';setTimeout(()=>status().catch(()=>{}),2000)}catch(e){$('message').textContent=e.message}};li.append(b);return li}));if(!d.devices.length)$('message').textContent='未发现 BLE 广播，请检查手柄配对模式';return}throw Error('扫描超时')}catch(e){$('message').textContent=e.message}};status().catch(e=>$('message').textContent=e.message);
+</script></html>)html";
 
         /**
          * @brief 发送 JSON 并释放临时对象
          */
         esp_err_t send_json(httpd_req_t *req, cJSON *json)
         {
-            cors(req);
             httpd_resp_set_type(req, "application/json");
             char *body = cJSON_PrintUnformatted(json);
             const esp_err_t result = body ? httpd_resp_sendstr(req, body) :
@@ -116,7 +112,6 @@ namespace web
         {
             if(!wifi::scan())
             {
-                cors(req);
                 httpd_resp_set_status(req, "503 Service Unavailable");
                 return httpd_resp_sendstr(req, "Wi-Fi busy");
             }
@@ -139,7 +134,6 @@ namespace web
             cJSON_Delete(input);
             if(!valid)
             {
-                cors(req);
                 return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                     "Invalid Wi-Fi target");
             }
@@ -151,18 +145,22 @@ namespace web
          */
         esp_err_t gamepad_devices(httpd_req_t *req)
         {
-            gamepad::device found[8];
-            const uint8_t count = gamepad::get_devices(found, 8);
+            gamepad::device found[24];
+            const uint8_t count = gamepad::get_devices(found, 24);
             cJSON *root = cJSON_CreateObject();
             cJSON_AddBoolToObject(root, "scanning",
                 gamepad::get_discovery().scanning);
+            cJSON_AddNumberToObject(root, "error",
+                gamepad::get_discovery().scan_error);
             cJSON *list = cJSON_AddArrayToObject(root, "devices");
             for(uint8_t i = 0; i < count; i++)
             {
                 cJSON *item = cJSON_CreateObject();
                 cJSON_AddNumberToObject(item, "index", i);
                 cJSON_AddStringToObject(item, "address", found[i].address);
+                cJSON_AddStringToObject(item, "name", found[i].name);
                 cJSON_AddNumberToObject(item, "rssi", found[i].rssi);
+                cJSON_AddBoolToObject(item, "xbox", found[i].xbox);
                 cJSON_AddItemToArray(list, item);
             }
             return send_json(req, root);
@@ -175,7 +173,6 @@ namespace web
         {
             if(!gamepad::scan_devices())
             {
-                cors(req);
                 httpd_resp_set_status(req, "503 Service Unavailable");
                 return httpd_resp_sendstr(req, "Gamepad unavailable");
             }
@@ -191,13 +188,12 @@ namespace web
             const cJSON *index = input ? cJSON_GetObjectItemCaseSensitive(input,
                 "index") : nullptr;
             const bool valid = cJSON_IsNumber(index) &&
-                index->valuedouble >= 0 && index->valuedouble <= 7 &&
+                index->valuedouble >= 0 && index->valuedouble <= 23 &&
                 index->valuedouble == index->valueint &&
                 gamepad::select_device(static_cast<uint8_t>(index->valueint));
             cJSON_Delete(input);
             if(!valid)
             {
-                cors(req);
                 return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
                     "Invalid gamepad");
             }
@@ -205,32 +201,14 @@ namespace web
         }
 
         /**
-         * @brief 处理浏览器 JSON 请求的跨源预检
+         * @brief 提供固件内置页面
          */
-        esp_err_t options(httpd_req_t *req)
-        {
-            cors(req);
-            char origin[80] = {};
-            if(httpd_req_get_hdr_value_str(req, "Origin", origin,
-                sizeof(origin)) == ESP_OK && strcmp(origin, PAGE_ORIGIN) == 0)
-            {
-                httpd_resp_set_hdr(req,
-                    "Access-Control-Allow-Private-Network", "true");
-            }
-            httpd_resp_set_hdr(req, "Access-Control-Allow-Methods",
-                "GET, POST, OPTIONS");
-            httpd_resp_set_hdr(req, "Access-Control-Allow-Headers",
-                "Content-Type");
-            return httpd_resp_send(req, nullptr, 0);
-        }
-
-        /**
-         * @brief 提供没有互联网时使用的本地配网页面
-         */
-        esp_err_t portal(httpd_req_t *req)
+        esp_err_t page(httpd_req_t *req)
         {
             httpd_resp_set_type(req, "text/html; charset=utf-8");
-            return httpd_resp_sendstr(req, PORTAL);
+            const char *html = strcmp(req->uri, "/wifi") == 0 ? WIFI_PAGE :
+                strcmp(req->uri, "/bluetooth") == 0 ? BLUETOOTH_PAGE : HOME;
+            return httpd_resp_sendstr(req, html);
         }
     }
 
@@ -244,21 +222,23 @@ namespace web
         httpd_config_t config = HTTPD_DEFAULT_CONFIG();
         config.core_id = 0;
         config.task_priority = 2;
+        config.stack_size = 6144;
         config.uri_match_fn = httpd_uri_match_wildcard;
-        config.max_uri_handlers = 9;
+        config.max_uri_handlers = 10;
         httpd_handle_t server = nullptr;
         if(httpd_start(&server, &config) != ESP_OK){return false;}
         const httpd_uri_t routes[] =
         {
-            {"/", HTTP_GET, portal, nullptr},
+            {"/", HTTP_GET, page, nullptr},
+            {"/wifi", HTTP_GET, page, nullptr},
+            {"/bluetooth", HTTP_GET, page, nullptr},
             {"/api/status", HTTP_GET, status, nullptr},
             {"/api/wifi/networks", HTTP_GET, wifi_networks, nullptr},
             {"/api/wifi/scan", HTTP_POST, wifi_scan, nullptr},
             {"/api/wifi/connect", HTTP_POST, wifi_connect, nullptr},
             {"/api/gamepad/devices", HTTP_GET, gamepad_devices, nullptr},
             {"/api/gamepad/scan", HTTP_POST, gamepad_scan, nullptr},
-            {"/api/gamepad/target", HTTP_POST, gamepad_target, nullptr},
-            {"/api/*", HTTP_OPTIONS, options, nullptr}
+            {"/api/gamepad/target", HTTP_POST, gamepad_target, nullptr}
         };
         for(const httpd_uri_t &route : routes)
         {

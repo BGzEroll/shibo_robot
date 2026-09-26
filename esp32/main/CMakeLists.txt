@@ -6,6 +6,7 @@ idf_component_register(SRCS "main.c" "../user_lib/app.cpp" "../user_lib/sys_time
                              "../user_lib/io/web.cpp"
                              "../user_lib/controller/control.cpp"
                              "../user_lib/controller/balance.cpp"
+                             "../user_lib/controller/leg.cpp"
                              "../user_lib/test.cpp"
                     INCLUDE_DIRS "." "../user_lib"
                     REQUIRES bt nvs_flash esp_wifi esp_netif esp_event

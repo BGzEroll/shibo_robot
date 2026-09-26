@@ -66,24 +66,26 @@ namespace balance
      * @return 左右轮原始目标力矩，单位 N·m
      */
     output step(float height_m, float pitch_rad, float pitch_rate_rad_s,
-        float linear_speed_m_s, float yaw_rate_rad_s, float dt_s)
+        float linear_speed_m_s, float yaw_rate_rad_s, float dt_s,
+        const reference &target)
     {
         update_gain(height_m);
-        
-        update_gain(0.048f);    // 调试用固定高度，正式启用高度反馈时删除此行。
 
-        linear_integral_m -= linear_speed_m_s * dt_s;
+        linear_integral_m += (target.linear_m_s - linear_speed_m_s) * dt_s;
         linear_integral_m = std::clamp(linear_integral_m,
             -settings.linear_integral_limit_m, settings.linear_integral_limit_m);
 
-        yaw_integral_rad -= yaw_rate_rad_s * dt_s;
+        yaw_integral_rad += (target.yaw_rad_s - yaw_rate_rad_s) * dt_s;
         yaw_integral_rad = std::clamp(yaw_integral_rad,
             -settings.yaw_integral_limit_rad, settings.yaw_integral_limit_rad);
 
         const float feedback[6] =
         {
-            pitch_rad, pitch_rate_rad_s, linear_speed_m_s,
-            yaw_rate_rad_s, linear_integral_m, yaw_integral_rad
+            pitch_rad, pitch_rate_rad_s,
+            target.linear_feedback ? linear_speed_m_s - target.linear_m_s : 0.0f,
+            target.yaw_feedback ? yaw_rate_rad_s - target.yaw_rad_s : 0.0f,
+            target.linear_feedback ? linear_integral_m : 0.0f,
+            target.yaw_feedback ? yaw_integral_rad : 0.0f
         };
 
         float torque[2] = {};

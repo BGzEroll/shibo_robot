@@ -18,7 +18,7 @@ namespace gamepad
     namespace
     {
         constexpr uint8_t MAX_REPORTS = 8;
-        constexpr uint8_t MAX_DEVICES = 8;
+        constexpr uint8_t MAX_DEVICES = 24;
         constexpr ble_uuid16_t HID_SERVICE = BLE_UUID16_INIT(0x1812);
 
         struct report
@@ -46,6 +46,7 @@ namespace gamepad
         ble_addr_t discovered_addresses[MAX_DEVICES] = {};
         device discovered[MAX_DEVICES];
         uint8_t discovered_count = 0;
+        int32_t scan_error = 0;
         ble_npl_event command_event;
         uint8_t command = 0;
 
@@ -330,19 +331,30 @@ namespace gamepad
             portEXIT_CRITICAL(&state_lock);
             if(next == 1)
             {
-                if(ble_gap_disc_active() && ble_gap_disc_cancel() != 0)
+                if(ble_gap_disc_active())
                 {
-                    manual_scan_pending = false;
-                    return;
+                    const int32_t result = ble_gap_disc_cancel();
+                    if(result != 0)
+                    {
+                        portENTER_CRITICAL(&state_lock);
+                        scan_error = result;
+                        manual_scan_pending = false;
+                        portEXIT_CRITICAL(&state_lock);
+                        return;
+                    }
                 }
                 manual_scan = true;
                 manual_scan_pending = false;
                 ble_gap_disc_params params = {};
                 params.passive = 0;
                 params.filter_duplicates = 0;
-                if(ble_gap_disc(own_address_type, 5000, &params,
-                    gap_event, nullptr) != 0)
+                const int32_t result = ble_gap_disc(own_address_type, 5000,
+                    &params, gap_event, nullptr);
+                if(result != 0)
                 {
+                    portENTER_CRITICAL(&state_lock);
+                    scan_error = result;
+                    portEXIT_CRITICAL(&state_lock);
                     manual_scan = false;
                     scan();
                 }
@@ -368,11 +380,15 @@ namespace gamepad
             switch(event->type)
             {
                 case BLE_GAP_EVENT_DISC:
-                    if(is_xbox(event->disc))
                     {
                         const ble_addr_t address = event->disc.addr;
                         if(manual_scan)
                         {
+                            const bool xbox = is_xbox(event->disc);
+                            ble_hs_adv_fields fields = {};
+                            const bool parsed = ble_hs_adv_parse_fields(&fields,
+                                event->disc.data,
+                                event->disc.length_data) == 0;
                             portENTER_CRITICAL(&state_lock);
                             uint8_t index = 0;
                             while(index < discovered_count &&
@@ -384,9 +400,23 @@ namespace gamepad
                             if(index == discovered_count && index < MAX_DEVICES)
                             {
                                 discovered_addresses[index] = address;
+                                discovered[index] = {};
                                 address_text(address, discovered[index].address);
-                                discovered[index].rssi = event->disc.rssi;
                                 discovered_count++;
+                            }
+                            if(index < discovered_count)
+                            {
+                                device &found = discovered[index];
+                                found.rssi = event->disc.rssi;
+                                found.xbox |= xbox;
+                                if(parsed && fields.name && fields.name_len)
+                                {
+                                    const uint8_t length = fields.name_len <
+                                        sizeof(found.name) - 1 ?
+                                        fields.name_len : sizeof(found.name) - 1;
+                                    memcpy(found.name, fields.name, length);
+                                    found.name[length] = 0;
+                                }
                             }
                             portEXIT_CRITICAL(&state_lock);
                             break;
@@ -395,8 +425,8 @@ namespace gamepad
                         const bool selected = target_set;
                         const ble_addr_t selected_address = target;
                         portEXIT_CRITICAL(&state_lock);
-                        if(selected && memcmp(&selected_address, &address,
-                            sizeof(address)) != 0)
+                        if(selected ? memcmp(&selected_address, &address,
+                            sizeof(address)) != 0 : !is_xbox(event->disc))
                         {
                             break;
                         }
@@ -586,6 +616,7 @@ namespace gamepad
         if(!started || !host_ready){return false;}
         portENTER_CRITICAL(&state_lock);
         discovered_count = 0;
+        scan_error = 0;
         manual_scan_pending = true;
         command = 1;
         portEXIT_CRITICAL(&state_lock);
@@ -615,6 +646,7 @@ namespace gamepad
         portENTER_CRITICAL(&state_lock);
         if(target_set){address_text(target, snapshot.target);}
         snapshot.scanning = manual_scan || manual_scan_pending;
+        snapshot.scan_error = scan_error;
         portEXIT_CRITICAL(&state_lock);
         return snapshot;
     }

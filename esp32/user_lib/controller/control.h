@@ -28,6 +28,7 @@ namespace control
 
     bool init();
     status get_status();
+    bool request_leg_calibration();
 }
 
 #endif

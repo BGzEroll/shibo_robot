@@ -1,6 +1,7 @@
 #include "test.h"
 
 #include "controller/control.h"
+#include "controller/leg.h"
 #include "hw/gamepad.h"
 #include "hw/sensor.h"
 #include "hw/leg_servo.h"
@@ -35,7 +36,7 @@ namespace test
             {
                 sensor::get_package(snapshot);
                 const bool pad_ready = gamepad::get_state(pad);
-                leg_servo::read_feedback(left_servo, right_servo);
+                leg::get_feedback(left_servo, right_servo);
                 const control::status control_status = control::get_status();
                 ESP_LOGI(
                         TAG,

@@ -37,13 +37,16 @@ namespace gamepad
     struct device
     {
         char address[18] = {};
+        char name[32] = {};
         int8_t rssi = 0;
+        bool xbox = false;
     };
 
     struct discovery
     {
         char target[18] = {};
         bool scanning = false;
+        int32_t scan_error = 0;
     };
 
     bool init();

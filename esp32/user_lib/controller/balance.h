@@ -9,6 +9,14 @@ namespace balance
         float right_Nm = 0.0f;
     };
 
+    struct reference
+    {
+        float linear_m_s = 0.0f;
+        float yaw_rad_s = 0.0f;
+        bool linear_feedback = true;
+        bool yaw_feedback = true;
+    };
+
     struct config
     {
         // 左右轮各六项：俯仰角、角速度、线速度、偏航角速度、线速度误差积分、偏航角速度误差积分。
@@ -33,7 +41,6 @@ namespace balance
             }
         };
         float wheel_radius_m = 0.0263f;
-        float model_height_m = 0.048f;
         float linear_integral_limit_m = 2.28f;
         float yaw_integral_limit_rad = 0.55f;
     };
@@ -41,7 +48,8 @@ namespace balance
     void init(const config &settings);
     void reset();
     output step(float height_m, float pitch_rad, float pitch_rate_rad_s,
-        float linear_speed_m_s, float yaw_rate_rad_s, float dt_s);
+        float linear_speed_m_s, float yaw_rate_rad_s, float dt_s,
+        const reference &target);
 }
 
 #endif
