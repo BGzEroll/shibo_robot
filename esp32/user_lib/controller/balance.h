@@ -11,7 +11,8 @@ namespace balance
 
     struct config
     {
-        // 左右轮各六项：俯仰角、俯仰角速度、线速度、偏航角速度、线速度误差积分、偏航角速度误差积分。
+        // 左右轮各六项：俯仰角、角速度、线速度、偏航角速度、线速度误差积分、偏航角速度误差积分。
+        // 每项四个系数按三次、二次、一次、常数排列。
         float gain_poly[2][6][4] =
         {
             {
@@ -41,7 +42,7 @@ namespace balance
 
     void init(const config &settings);
     void reset();
-    output step(float pitch_rad, float pitch_rate_rad_s,
+    output step(float height_m, float pitch_rad, float pitch_rate_rad_s,
         float linear_speed_m_s, float yaw_rate_rad_s, float dt_s);
 }
 

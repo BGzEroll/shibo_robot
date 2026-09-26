@@ -104,7 +104,7 @@ namespace control
                 else
                 {
                     const balance::output torque = balance::step(
-                        pitch, pitch_rate, speed, yaw_rate,
+                        settings.model_height_m, pitch, pitch_rate, speed, yaw_rate,
                         PERIOD_MS * 0.001f);
                     const float left_mNm = torque.left_nm * 1000.0f *
                         (2.0f / 3.0f);       // lqi 参数不太能匹配上，临时直接调整输出，之后再调
