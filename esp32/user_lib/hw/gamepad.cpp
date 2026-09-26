@@ -330,20 +330,21 @@ namespace gamepad
             portEXIT_CRITICAL(&state_lock);
             if(next == 1)
             {
-                manual_scan_pending = true;
-                if(ble_gap_disc_active()){ble_gap_disc_cancel();}
-                else
+                if(ble_gap_disc_active() && ble_gap_disc_cancel() != 0)
                 {
                     manual_scan_pending = false;
-                    manual_scan = true;
-                    ble_gap_disc_params params = {};
-                    params.passive = 0;
-                    params.filter_duplicates = 1;
-                    if(ble_gap_disc(own_address_type, 5000, &params,
-                        gap_event, nullptr) != 0)
-                    {
-                        manual_scan = false;
-                    }
+                    return;
+                }
+                manual_scan = true;
+                manual_scan_pending = false;
+                ble_gap_disc_params params = {};
+                params.passive = 0;
+                params.filter_duplicates = 0;
+                if(ble_gap_disc(own_address_type, 5000, &params,
+                    gap_event, nullptr) != 0)
+                {
+                    manual_scan = false;
+                    scan();
                 }
             }
             else if(next == 2)
@@ -499,20 +500,6 @@ namespace gamepad
                     break;
 
                 case BLE_GAP_EVENT_DISC_COMPLETE:
-                    if(manual_scan_pending)
-                    {
-                        manual_scan_pending = false;
-                        manual_scan = true;
-                        ble_gap_disc_params params = {};
-                        params.passive = 0;
-                        params.filter_duplicates = 1;
-                        if(ble_gap_disc(own_address_type, 5000, &params,
-                            gap_event, nullptr) != 0)
-                        {
-                            manual_scan = false;
-                        }
-                        break;
-                    }
                     if(manual_scan){manual_scan = false;}
                     if(!connecting){scan();}
                     break;
@@ -599,6 +586,7 @@ namespace gamepad
         if(!started || !host_ready){return false;}
         portENTER_CRITICAL(&state_lock);
         discovered_count = 0;
+        manual_scan_pending = true;
         command = 1;
         portEXIT_CRITICAL(&state_lock);
         ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &command_event);
