@@ -718,10 +718,6 @@ namespace sensor
     {
         constexpr uint64_t MPU_PERIOD_US = 5000;
 
-        constexpr uint32_t TASK_STACK = 4096;
-        constexpr UBaseType_t TASK_PRIORITY = 5;
-        constexpr BaseType_t TASK_CORE = 1;
-
         portMUX_TYPE package_lock = portMUX_INITIALIZER_UNLOCKED;
 
         package latest_package;
@@ -892,11 +888,11 @@ namespace sensor
         if(xTaskCreatePinnedToCore(
             task,
             "sensor",
-            TASK_STACK,
+            4096,
             nullptr,
-            TASK_PRIORITY,
+            5,
             nullptr,
-            TASK_CORE) != pdPASS)
+            1) != pdPASS)
         {
             return false;
         }
