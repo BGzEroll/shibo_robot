@@ -69,6 +69,7 @@ namespace control
 
                 const float pitch = snapshot.imu.angle[1];
                 const float pitch_rate = snapshot.imu.gyro[1];
+                const float yaw_rate = snapshot.imu.gyro[2];
                 const float speed = -(
                     static_cast<float>(motor_directions.left) *
                         snapshot.left_encoder.speed_mrad_s +
@@ -76,7 +77,8 @@ namespace control
                         snapshot.right_encoder.speed_mrad_s) *
                     0.0005f * settings.wheel_radius_m;
                 const bool valid = fresh && isfinite(pitch) &&
-                    isfinite(pitch_rate) && isfinite(speed);
+                    isfinite(pitch_rate) && isfinite(yaw_rate) &&
+                    isfinite(speed);
 
                 if(engaged && (!valid || fabsf(pitch) > TRIP_PITCH_RAD))
                 {
@@ -101,9 +103,14 @@ namespace control
                 }
                 else
                 {
-                    const float torque_mNm = balance::step(pitch, pitch_rate,
-                        speed, PERIOD_MS * 0.001f) * 1000.0f * (2.0f / 3.0f);       // lqi 参数不太能匹配上，临时直接调整输出，之后再调
-                    if(!isfinite(torque_mNm))
+                    const balance::output torque = balance::step(
+                        pitch, pitch_rate, speed, yaw_rate,
+                        PERIOD_MS * 0.001f);
+                    const float left_mNm = torque.left_nm * 1000.0f *
+                        (2.0f / 3.0f);       // lqi 参数不太能匹配上，临时直接调整输出，之后再调
+                    const float right_mNm = torque.right_nm * 1000.0f *
+                        (2.0f / 3.0f);
+                    if(!isfinite(left_mNm) || !isfinite(right_mNm))
                     {
                         engaged = false;
                         tripped = true;
@@ -112,10 +119,13 @@ namespace control
                     }
                     else
                     {
-                        const float limited = fmaxf(-settings.max_torque_mNm,
-                            fminf(settings.max_torque_mNm, torque_mNm));
-                        const int32_t target_mNm = static_cast<int32_t>(roundf(limited));
-                        motor::set_target(target_mNm, target_mNm, true);
+                        const float left_limited = fmaxf(-settings.max_torque_mNm,
+                            fminf(settings.max_torque_mNm, left_mNm));
+                        const float right_limited = fmaxf(-settings.max_torque_mNm,
+                            fminf(settings.max_torque_mNm, right_mNm));
+                        motor::set_target(
+                            static_cast<int32_t>(roundf(left_limited)),
+                            static_cast<int32_t>(roundf(right_limited)), true);
                     }
                 }
 

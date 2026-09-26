@@ -39,7 +39,7 @@ namespace test
                         "\033[2J\033[H"
                         "BALANCE MONITOR\n"
                         "CTRL %-11s pitch=%+6.3f rad v=%+6.3f m/s hold=%3" PRIu32 " ms\n"
-                        "IMU t=%12" PRIu64 " gyroY=%+7.3f rad/s\n"
+                        "IMU t=%12" PRIu64 " gyroY=%+7.3f gyroZ=%+7.3f rad/s\n"
                         "L t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
                         "R t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
                         "LEG ok  rad  rad/s duty     V   C     A mov err\n"
@@ -54,6 +54,7 @@ namespace test
                         control_status.upright_ms,
                         snapshot.imu.timestamp_us,
                         snapshot.imu.gyro[1],
+                        snapshot.imu.gyro[2],
                         snapshot.left_encoder.timestamp_us,
                         snapshot.left_encoder.full_count,
                         snapshot.left_encoder.speed_mrad_s,
