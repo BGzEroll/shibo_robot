@@ -1,6 +1,7 @@
 #include "leg_servo.h"
 
 #include "sys_time.h"
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,9 +11,9 @@ namespace uart
     namespace
     {
         constexpr uart_port_t PORT = UART_NUM_2;
-        constexpr int TX_PIN = 17;
-        constexpr int RX_PIN = 16;
-        constexpr int BAUD_RATE = 1000000;
+        constexpr gpio_num_t TX_PIN = GPIO_NUM_17;
+        constexpr gpio_num_t RX_PIN = GPIO_NUM_16;
+        constexpr int32_t BAUD_RATE = 1000000;
 
         bool initialized = false;
     }
@@ -81,7 +82,7 @@ namespace uart
      *
      * @return 实际读取长度
      */
-    int read(uint8_t *data, size_t size)
+    int32_t read(uint8_t *data, size_t size)
     {
         return uart_read_bytes(PORT, data, size, pdMS_TO_TICKS(1));
     }
@@ -111,6 +112,8 @@ namespace leg_servo
         constexpr uint8_t PRESENT_POSITION = 56;
         constexpr uint8_t FEEDBACK_SIZE = 15;
         constexpr uint64_t READ_TIMEOUT_US = 5000;
+        constexpr float RAD_PER_COUNT = 6.2831853f / 4096.0f;
+        constexpr float SPEED_RAD_S_PER_COUNT = 50.0f * RAD_PER_COUNT;
 
         /**
          * @brief 读取 STS 小端 16 位值
@@ -167,22 +170,27 @@ namespace leg_servo
             const uint16_t load = read_word(data + 4);
             const uint16_t current = read_word(data + 13);
 
-            output.position = position & 0x8000 ?
+            const int16_t position_count = position & 0x8000 ?
                 -static_cast<int16_t>(position & 0x7FFF) :
                 static_cast<int16_t>(position);
-            output.speed = speed & 0x8000 ?
+            const int16_t speed_count = speed & 0x8000 ?
                 -static_cast<int16_t>(speed & 0x7FFF) :
                 static_cast<int16_t>(speed);
-            output.load = load & 0x400 ?
+            const int16_t duty_count = load & 0x400 ?
                 -static_cast<int16_t>(load & 0x3FF) :
                 static_cast<int16_t>(load & 0x3FF);
-            output.voltage = data[6];
-            output.temperature = data[7];
-            output.moving = data[10];
-            output.current = current & 0x8000 ?
+            const int16_t current_count = current & 0x8000 ?
                 -static_cast<int16_t>(current & 0x7FFF) :
                 static_cast<int16_t>(current);
-            output.status = frame[4];
+
+            output.position_rad = position_count * RAD_PER_COUNT;
+            output.speed_rad_s = speed_count * SPEED_RAD_S_PER_COUNT;
+            output.drive_duty = duty_count * 0.001f;
+            output.voltage_v = data[6] * 0.1f;
+            output.temperature_c = data[7];
+            output.moving = data[10] != 0;
+            output.current_a = current_count * 0.0065f;
+            output.status_bits = frame[4];
             output.timestamp_us = sys_time::get_us_tick();
             output.valid = true;
         }
@@ -262,7 +270,7 @@ namespace leg_servo
         while(sys_time::get_us_tick() - start_us < READ_TIMEOUT_US &&
               (!left.valid || !right.valid))
         {
-            const int received = uart::read(
+            const int32_t received = uart::read(
                 buffer + used, sizeof(buffer) - used);
             if(received <= 0){continue;}
             used += received;

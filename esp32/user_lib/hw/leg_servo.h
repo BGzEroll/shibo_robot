@@ -22,14 +22,14 @@ namespace leg_servo
     {
         uint64_t timestamp_us = 0;      // 上次有效反馈的时间
         bool valid = false;     // 本次读取是否有效
-        int16_t position = 0;
-        int16_t speed = 0;
-        int16_t load = 0;       // 以下数值保留舵机协议原始单位
-        uint8_t voltage = 0;
-        uint8_t temperature = 0;
-        uint8_t moving = 0;
-        int16_t current = 0;
-        uint8_t status = 0;
+        float position_rad = 0.0f;      // 0 计数对应 0 rad，中位对应 pi rad
+        float speed_rad_s = 0.0f;
+        float drive_duty = 0.0f;        // 电机驱动占空比，范围 -1 到 1
+        float voltage_v = 0.0f;
+        uint8_t temperature_c = 0;
+        bool moving = false;
+        float current_a = 0.0f;     // STS3032 不提供电流反馈
+        uint8_t status_bits = 0;        // 舵机错误位
     };
 
     bool init();
