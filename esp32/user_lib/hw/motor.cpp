@@ -4,7 +4,7 @@
 #include "sys_time.h"
 #include "driver/gpio.h"
 #include "driver/mcpwm_prelude.h"
-#include "esp_log.h"
+#include "esp_err.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -13,25 +13,22 @@ namespace motor
 {
     namespace
     {
-        constexpr char TAG[] = "motor";
         constexpr int32_t Q15_ONE = 32768;
         constexpr int32_t OUTPUT_LIMIT = 18919;
         constexpr int32_t POLE_PAIRS = 7;
-        constexpr uint32_t PWM_PEAK = 1600;       // 80 MHz / (2 * 25 kHz)
+        constexpr uint32_t PWM_PEAK = 1600;     // 80 MHz / (2 * 25 kHz)
         constexpr uint64_t ENCODER_TIMEOUT_US = 5000;
         constexpr uint64_t COMMAND_TIMEOUT_US = 20000;
         constexpr uint32_t MAX_PREDICT_US = 1000;
-        constexpr uint32_t IDLE_PERIOD_US = 1000000;
         constexpr uint32_t DIRECTION_STEPS = 500;
         constexpr int32_t DIRECTION_MIN_COUNT = 41;
         constexpr uint32_t ZERO_SAMPLES = 32;
 
-        // 星接：线间电阻的一半是相电阻。浮点仅用于编译期生成整数系数。
-        constexpr double LINE_RESISTANCE = 12.27166;
-        constexpr double PHASE_RESISTANCE = LINE_RESISTANCE / 2.0;
+        // 浮点仅用于编译期生成整数系数。
+        constexpr double PHASE_RESISTANCE = 12.27166;
         constexpr double KT_KE = 0.0796;
         constexpr double BUS_VOLTAGE = 7.4;
-        constexpr int32_t ALIGNMENT_UQ = 7529; // 1.7 V / 7.4 V，Q15
+        constexpr int32_t ALIGNMENT_UQ = 7529;      // 1.7 V / 7.4 V，Q15
         constexpr int32_t TORQUE_GAIN_Q10 = static_cast<int32_t>(
             PHASE_RESISTANCE / KT_KE / BUS_VOLTAGE * Q15_ONE / 1000.0 * 1024.0 + 0.5);
         constexpr int32_t BEMF_GAIN_Q14 = static_cast<int32_t>(
@@ -67,6 +64,13 @@ namespace motor
         mcpwm_timer_handle_t timer = nullptr;
         bool started = false;
 
+        /**
+         * @brief Q15 正弦查表与线性插值
+         *
+         * @param[in] phase 16 位电角度
+         *
+         * @return Q15 正弦值
+         */
         int32_t lookup_sin(uint16_t phase)
         {
             static constexpr uint16_t table[65] =
@@ -110,7 +114,13 @@ namespace motor
             return a + (((b - a) * fraction) >> 8);
         }
 
-        // Q15 逆 Park、逆 Clarke、零序注入，直接更新固定的三相比较值。
+        /**
+         * @brief 逆 Park、逆 Clarke 和零序注入并更新三相 PWM
+         *
+         * @param[in, out] motor 电机上下文
+         * @param[in] uq Q15 归一化 q 轴电压
+         * @param[in] phase 16 位电角度
+         */
         void output(context &motor, int32_t uq, uint16_t phase)
         {
             if(uq > OUTPUT_LIMIT){uq = OUTPUT_LIMIT;}
@@ -145,6 +155,11 @@ namespace motor
             }
         }
 
+        /**
+         * @brief 关闭驱动并将三相占空比恢复到中点
+         *
+         * @param[in, out] motor 电机上下文
+         */
         void disable(context &motor)
         {
             if(!motor.enabled){return;}
@@ -153,13 +168,20 @@ namespace motor
             output(motor, 0, 0);
         }
 
-        // 两台电机共用 25 kHz 中心对齐计时器；每相用同一 operator 的 A/B 输出。
+        /**
+         * @brief 初始化双电机共用的 25 kHz 中心对齐 PWM
+         *
+         * @return true 初始化成功
+         * @return false PWM 资源初始化失败
+         */
         bool init_pwm()
         {
             gpio_set_level(left.enable_pin, 0);
             gpio_set_level(right.enable_pin, 0);
             gpio_config_t pins{};
-            pins.pin_bit_mask = (1ULL << left.enable_pin) | (1ULL << right.enable_pin);
+            pins.pin_bit_mask =
+                (static_cast<uint64_t>(1) << left.enable_pin) |
+                (static_cast<uint64_t>(1) << right.enable_pin);
             pins.mode = GPIO_MODE_OUTPUT;
             if(gpio_config(&pins) != ESP_OK){return false;}
 
@@ -219,9 +241,20 @@ namespace motor
                 mcpwm_timer_start_stop(timer, MCPWM_TIMER_START_NO_STOP) == ESP_OK;
         }
 
+        /**
+         * @brief 等待当前电机的新编码器样本
+         *
+         * @param[in, out] motor 电机上下文
+         * @param[out] next 新编码器样本
+         * @param[in] timeout_ms 最长等待时间
+         *
+         * @return true 收到新鲜样本
+         * @return false 等待或编码器超时
+         */
         bool wait_encoder(context &motor, sensor::encoder_data &next, uint32_t timeout_ms)
         {
-            const uint64_t deadline = sys_time::get_us_tick() + timeout_ms * 1000ULL;
+            const uint64_t deadline =
+                sys_time::get_us_tick() + static_cast<uint64_t>(timeout_ms) * 1000;
             while(sys_time::get_us_tick() < deadline)
             {
                 sensor::package snapshot;
@@ -246,10 +279,21 @@ namespace motor
             return false;
         }
 
+        /**
+         * @brief 保持当前电角度并持续检查编码器
+         *
+         * @param[in, out] motor 电机上下文
+         * @param[out] encoder 最后一个编码器样本
+         * @param[in] duration_ms 保持时间
+         *
+         * @return true 持续收到新鲜样本
+         * @return false 编码器超时
+         */
         bool hold_encoder(context &motor, sensor::encoder_data &encoder,
             uint32_t duration_ms)
         {
-            const uint64_t deadline = sys_time::get_us_tick() + duration_ms * 1000ULL;
+            const uint64_t deadline =
+                sys_time::get_us_tick() + static_cast<uint64_t>(duration_ms) * 1000;
             while(sys_time::get_us_tick() < deadline)
             {
                 if(!wait_encoder(motor, encoder, 20)){return false;}
@@ -257,7 +301,15 @@ namespace motor
             return true;
         }
 
-        bool calibrate(context &motor, const char *name)
+        /**
+         * @brief 扫描电角度并校准编码器方向与零电角
+         *
+         * @param[in, out] motor 电机上下文
+         *
+         * @return true 校准成功
+         * @return false 编码器超时或方向扫描失败
+         */
+        bool calibrate(context &motor)
         {
             sensor::encoder_data encoder;
             if(!wait_encoder(motor, encoder, 100)){return false;}
@@ -272,7 +324,7 @@ namespace motor
             for(uint32_t step = 0; step <= DIRECTION_STEPS; step++)
             {
                 const uint16_t phase = static_cast<uint16_t>(
-                    0xC000U + step * 65536U / DIRECTION_STEPS);
+                    0xC000 + step * 65536 / DIRECTION_STEPS);
                 output(motor, ALIGNMENT_UQ, phase);
                 vTaskDelay(pdMS_TO_TICKS(2));
                 if(!wait_encoder(motor, encoder, 20)){return false;}
@@ -282,7 +334,7 @@ namespace motor
             for(int32_t step = DIRECTION_STEPS; step >= 0; step--)
             {
                 const uint16_t phase = static_cast<uint16_t>(
-                    0xC000U + static_cast<uint32_t>(step) * 65536U / DIRECTION_STEPS);
+                    0xC000 + static_cast<uint32_t>(step) * 65536 / DIRECTION_STEPS);
                 output(motor, ALIGNMENT_UQ, phase);
                 vTaskDelay(pdMS_TO_TICKS(2));
                 if(!wait_encoder(motor, encoder, 20)){return false;}
@@ -300,8 +352,6 @@ namespace motor
             }
             else
             {
-                ESP_LOGE(TAG, "%s direction failed: forward=%ld reverse=%ld",
-                    name, static_cast<long>(forward_delta), static_cast<long>(reverse_delta));
                 return false;
             }
 
@@ -317,12 +367,17 @@ namespace motor
 
             motor.zero_phase = static_cast<uint16_t>(
                 static_cast<int32_t>(motor.direction) * POLE_PAIRS * (sum / ZERO_SAMPLES));
-            ESP_LOGI(TAG, "%s calibrated: direction=%d forward=%ld reverse=%ld",
-                name, motor.direction, static_cast<long>(forward_delta),
-                static_cast<long>(reverse_delta));
             return true;
         }
 
+        /**
+         * @brief 根据新鲜编码器样本计算电压并更新当前电机
+         *
+         * @param[in, out] motor 电机上下文
+         * @param[in] encoder 编码器样本
+         * @param[in] torque_mNm 目标力矩，单位 mN·m
+         * @param[in] now_us 当前时间，单位 us
+         */
         void update(context &motor, const sensor::encoder_data &encoder,
             int32_t torque_mNm, uint64_t now_us)
         {
@@ -351,9 +406,11 @@ namespace motor
             }
         }
 
+        /**
+         * @brief core 1 上持续运行的双电机 FOC 任务
+         */
         void task(void *)
         {
-            uint64_t next_idle_us = sys_time::get_us_tick() + IDLE_PERIOD_US;
             sensor::package snapshot;
             while(true)
             {
@@ -386,58 +443,47 @@ namespace motor
                     disable(right);
                 }
 
-                // 运行期间保持 yield；每秒让空闲任务运行一次以喂 core 1 看门狗。
-                if(now_us >= next_idle_us)
-                {
-                    next_idle_us = now_us + IDLE_PERIOD_US;
-                    vTaskDelay(1);
-                }
-                else
-                {
-                    taskYIELD();
-                }
+                taskYIELD();
             }
         }
     }
 
+    /**
+     * @brief 初始化 PWM、校准双电机并启动 FOC 任务
+     *
+     * @return true 初始化成功
+     * @return false PWM、校准或任务创建失败
+     */
     bool init()
     {
         if(started){return true;}
-        if(!init_pwm())
-        {
-            ESP_LOGE(TAG, "PWM init failed");
-            return false;
-        }
+        if(!init_pwm()){return false;}
 
-        const bool left_ok = calibrate(left, "left");
+        const bool left_ok = calibrate(left);
         disable(left);
-        if(!left_ok)
-        {
-            ESP_LOGE(TAG, "left calibration failed");
-            return false;
-        }
+        if(!left_ok){return false;}
 
-        const bool right_ok = calibrate(right, "right");
+        const bool right_ok = calibrate(right);
         disable(right);
-        if(!right_ok)
-        {
-            ESP_LOGE(TAG, "right calibration failed");
-            return false;
-        }
+        if(!right_ok){return false;}
 
         portENTER_CRITICAL(&command_lock);
         target = command{};
         portEXIT_CRITICAL(&command_lock);
         if(xTaskCreatePinnedToCore(task, "motor", 4096, nullptr, 5, nullptr, 1) != pdPASS)
-        {
-            ESP_LOGE(TAG, "task creation failed");
-            return false;
-        }
+        {return false;}
 
         started = true;
         return true;
     }
 
+    /**
+     * @brief 提交左右电机力矩目标与使能状态
+     *
+     * @param[in] left_mNm 左电机目标力矩，单位 mN·m
+     * @param[in] right_mNm 右电机目标力矩，单位 mN·m
+     * @param[in] enabled 是否使能输出
+     */
     void set_target(int32_t left_mNm, int32_t right_mNm, bool enabled)
     {
         const uint64_t now_us = sys_time::get_us_tick();
