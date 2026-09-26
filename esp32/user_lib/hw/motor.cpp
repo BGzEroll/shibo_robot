@@ -4,8 +4,6 @@
 #include "sys_time.h"
 #include "driver/gpio.h"
 #include "driver/mcpwm_prelude.h"
-#include "esp_err.h"
-#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -28,7 +26,9 @@ namespace motor
         constexpr double PHASE_RESISTANCE = 12.27166;
         constexpr double KT_KE = 0.0796;
         constexpr double BUS_VOLTAGE = 7.4;
-        constexpr int32_t ALIGNMENT_UQ = 7529;      // 1.7 V / 7.4 V，Q15
+        constexpr float ALIGNMENT_VOLTAGE = 1.7f;
+        constexpr int32_t ALIGNMENT_UQ = static_cast<int32_t>(
+            ALIGNMENT_VOLTAGE / BUS_VOLTAGE * Q15_ONE + 0.5);
         constexpr int32_t TORQUE_GAIN_Q10 = static_cast<int32_t>(
             PHASE_RESISTANCE / KT_KE / BUS_VOLTAGE * Q15_ONE / 1000.0 * 1024.0 + 0.5);
         constexpr int32_t BEMF_GAIN_Q14 = static_cast<int32_t>(
@@ -258,7 +258,7 @@ namespace motor
             while(sys_time::get_us_tick() < deadline)
             {
                 sensor::package snapshot;
-                sensor::get_package(snapshot); // 返回值只表示 IMU 是否就绪。
+                sensor::get_package(snapshot);      // 返回值只表示 IMU 是否就绪。
                 next = snapshot.*motor.encoder;
                 const uint64_t now_us = sys_time::get_us_tick();
                 if(next.timestamp_us != 0 &&
@@ -315,7 +315,7 @@ namespace motor
             if(!wait_encoder(motor, encoder, 100)){return false;}
 
             output(motor, ALIGNMENT_UQ, 0xC000);
-            esp_rom_delay_us(50); // 等待三相比较值在 PWM 零点装载。
+            sys_time::delay_us(50);     // 等待三相比较值在 PWM 零点装载。
             gpio_set_level(motor.enable_pin, 1);
             motor.enabled = true;
             if(!hold_encoder(motor, encoder, 300)){return false;}
@@ -400,7 +400,7 @@ namespace motor
             output(motor, static_cast<int32_t>(uq), electrical);
             if(!motor.enabled)
             {
-                esp_rom_delay_us(50);
+                sys_time::delay_us(50);
                 gpio_set_level(motor.enable_pin, 1);
                 motor.enabled = true;
             }
