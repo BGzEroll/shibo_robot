@@ -7,7 +7,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#include <algorithm>
 #include <math.h>
 #include <stdint.h>
 
@@ -18,9 +17,10 @@ namespace control
         constexpr uint32_t PERIOD_MS = 1;
         constexpr uint64_t ENCODER_TIMEOUT_US = 5000;
         constexpr uint64_t IMU_TIMEOUT_US = 15000;
+        // 调试用自动启动条件，接入手柄后删除。
         constexpr float ARM_PITCH_RAD = 0.15f;
-        constexpr float TRIP_PITCH_RAD = 0.5f;
         constexpr uint32_t ARM_TICKS = 100;
+        constexpr float TRIP_PITCH_RAD = 0.5f;
 
         balance::config settings;
         motor::directions motor_directions;
@@ -57,7 +57,6 @@ namespace control
             {
                 sensor::package snapshot;
                 const bool imu_ready = sensor::get_package(snapshot);
-
                 const uint64_t now_us = sys_time::get_us_tick();
 
                 const bool fresh = imu_ready &&
@@ -82,17 +81,11 @@ namespace control
                     0.5f *
                     settings.wheel_radius_m;
 
-                const bool valid = fresh &&
-                    isfinite(pitch) &&
-                    isfinite(pitch_rate)&&
-                    isfinite(yaw_rate) &&
-                    isfinite(speed);
-
-                if(engaged && (!valid || fabsf(pitch) > TRIP_PITCH_RAD))
+                if(engaged && (!fresh || fabsf(pitch) > TRIP_PITCH_RAD))
                 {
                     engaged = false;
                     tripped = true;
-                    trip_reason = valid ? arm_state::tripped_pitch :
+                    trip_reason = fresh ? arm_state::tripped_pitch :
                         arm_state::tripped_sensor;
                 }
 
@@ -100,14 +93,19 @@ namespace control
                 {
                     balance::reset();
                     motor::set_target(0, 0, false);
-                    if(!tripped && valid && fabsf(pitch) < ARM_PITCH_RAD)
+
+                    bool enable_request = false;
+                    // 调试用自动启动：连续扶正后请求使能，接入手柄后替换此段。
+                    if(!tripped && fresh && fabsf(pitch) < ARM_PITCH_RAD)
                     {
-                        if(++upright_ticks >= ARM_TICKS){engaged = true;}
+                        enable_request = ++upright_ticks >= ARM_TICKS;
                     }
                     else
                     {
                         upright_ticks = 0;
                     }
+
+                    if(!tripped && fresh && enable_request){engaged = true;}
                 }
                 else
                 {
@@ -120,38 +118,24 @@ namespace control
                         PERIOD_MS * 0.001f);
 
                     const float temporary_scale = 0.1f * (2.0f / 3.0f); // q_test 临时缩放
-                    const float left_mNm = torque.left_nm * temporary_scale * 1000.0f;
-                    const float right_mNm = torque.right_nm * temporary_scale * 1000.0f;
+                    const float left_mNm = torque.left_Nm * temporary_scale * 1000.0f;
+                    const float right_mNm = torque.right_Nm * temporary_scale * 1000.0f;
 
-                    if(!isfinite(left_mNm) || !isfinite(right_mNm))
-                    {
-                        engaged = false;
-                        tripped = true;
-                        trip_reason = arm_state::tripped_output;
-                        motor::set_target(0, 0, false);
-                    }
-                    else
-                    {
-                        const float left_limited = std::clamp(left_mNm,
-                            -settings.max_torque_mNm, settings.max_torque_mNm);
-                        const float right_limited = std::clamp(right_mNm,
-                            -settings.max_torque_mNm, settings.max_torque_mNm);
-
-                        motor::set_target(
-                            static_cast<int32_t>(roundf(left_limited)),
-                            static_cast<int32_t>(roundf(right_limited)),
-                            true);
-                    }
+                    motor::set_target(
+                        static_cast<int32_t>(roundf(left_mNm)),
+                        static_cast<int32_t>(roundf(right_mNm)),
+                        true);
                 }
 
                 arm_state state = arm_state::arming;
                 if(tripped){state = trip_reason;}
                 else if(engaged){state = arm_state::active;}
-                else if(!valid){state = arm_state::wait_sensor;}
+                else if(!fresh){state = arm_state::wait_sensor;}
                 else if(fabsf(pitch) >= ARM_PITCH_RAD)
                 {
                     state = arm_state::wait_pitch;
                 }
+
                 publish_status({state, pitch, speed, upright_ticks * PERIOD_MS});
 
                 vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PERIOD_MS));

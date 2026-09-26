@@ -14,8 +14,7 @@ namespace control
         arming,
         active,
         tripped_sensor,
-        tripped_pitch,
-        tripped_output
+        tripped_pitch
     };
 
     struct status

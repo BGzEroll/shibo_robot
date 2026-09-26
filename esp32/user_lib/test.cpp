@@ -18,8 +18,7 @@ namespace test
         constexpr const char *ARM_STATES[] =
         {
             "PREPARING", "INIT_FAILED", "WAIT_SENSOR", "WAIT_PITCH",
-            "ARMING", "ACTIVE", "TRIP_SENSOR",
-            "TRIP_PITCH", "TRIP_OUTPUT"
+            "ARMING", "ACTIVE", "TRIP_SENSOR", "TRIP_PITCH"
         };
 
         void task(void *)

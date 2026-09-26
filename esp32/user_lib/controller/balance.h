@@ -5,8 +5,8 @@ namespace balance
 {
     struct output
     {
-        float left_nm = 0.0f;
-        float right_nm = 0.0f;
+        float left_Nm = 0.0f;
+        float right_Nm = 0.0f;
     };
 
     struct config
@@ -36,7 +36,6 @@ namespace balance
         float model_height_m = 0.048f;
         float linear_integral_limit_m = 2.28f;
         float yaw_integral_limit_rad = 0.55f;
-        float max_torque_mNm = 30.0f;
     };
 
     void init(const config &settings);
