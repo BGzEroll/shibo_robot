@@ -196,7 +196,7 @@ namespace control
 
                 if(run.current != mode::boot && run.current != mode::stop &&
                     (!fresh || !pad_ready ||
-                    ((run.current == mode::balance || run.current == mode::jump) &&
+                    (run.current != mode::sit && run.current != mode::stand &&
                         fabsf(pitch) > TRIP_PITCH_RAD)))
                 {
                     run.current = mode::stop;
@@ -467,11 +467,6 @@ namespace control
                                         run.target_yaw, snapshot.imu.angle[2]),
                                     -limit, limit);
                             }
-                        }
-                        else
-                        {
-                            target.linear_feedback = false;
-                            target.yaw_feedback = false;
                         }
                         const balance::output torque = balance::step(
                             leg::height_m(),

@@ -71,6 +71,8 @@ namespace balance
     {
         update_gain(height_m);
 
+        update_gain(0.048f);    // 调试用固定高度，正式启用高度反馈时删除此行。
+
         linear_integral_m += (target.linear_m_s - linear_speed_m_s) * dt_s;
         linear_integral_m = std::clamp(linear_integral_m,
             -settings.linear_integral_limit_m, settings.linear_integral_limit_m);
