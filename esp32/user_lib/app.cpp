@@ -1,3 +1,4 @@
+#include "hw/motor.h"
 #include "hw/sensor.h"
 #include "test.h"
 
@@ -6,7 +7,10 @@
  */
 extern "C" void app_init(void)
 {
-    sensor::init();
+    if(sensor::init())
+    {
+        motor::init();
+    }
 
     test::init();
 }
