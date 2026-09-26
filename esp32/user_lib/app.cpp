@@ -11,12 +11,12 @@
 extern "C" void app_init(void)
 {
     if(!sensor::init() ||
-        !motor::init() ||
-        !leg_servo::init())
+        !motor::init())
     {
         return;
     }
 
+    leg_servo::init();
     control::init();
 
     test::init();

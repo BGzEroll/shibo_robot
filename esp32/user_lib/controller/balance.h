@@ -14,13 +14,14 @@ namespace balance
             {0.0f, 0.0f, 0.0f, 0.84459977f}
         };
         float wheel_radius_m = 0.0263f;
+        float model_height_m = 0.048f;
         float speed_filter_tau_s = 0.008f;
         float linear_integral_limit_m = 2.28f;
         float torque_scale = 0.1f;
         float max_torque_mNm = 30.0f;
     };
 
-    void init(const config &settings, float leg_height_m);
+    void init(const config &settings);
     void reset();
     float step(float pitch_rad, float pitch_rate_rad_s,
         float linear_speed_m_s, float dt_s);

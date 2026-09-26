@@ -1,5 +1,6 @@
 #include "test.h"
 
+#include "controller/control.h"
 #include "hw/sensor.h"
 #include "hw/leg_servo.h"
 #include "esp_log.h"
@@ -14,6 +15,12 @@ namespace test
     {
         constexpr const char *TAG = "test";
         constexpr uint32_t PRINT_PERIOD_MS = 100;
+        constexpr const char *ARM_STATES[] =
+        {
+            "PREPARING", "INIT_FAILED", "WAIT_SENSOR", "WAIT_PITCH",
+            "ARMING", "ACTIVE", "TRIP_SENSOR",
+            "TRIP_PITCH", "TRIP_OUTPUT"
+        };
 
         void task(void *)
         {
@@ -26,10 +33,13 @@ namespace test
             {
                 sensor::get_package(snapshot);
                 leg_servo::read_feedback(left_servo, right_servo);
+                const control::status control_status = control::get_status();
                 ESP_LOGI(
                         TAG,
                         "\033[2J\033[H"
                         "BALANCE MONITOR\n"
+                        "CTRL %-11s pitch=%+6.3f rad v=%+6.3f m/s hold=%3" PRIu32 " ms\n"
+                        "IMU t=%12" PRIu64 " gyroY=%+7.3f rad/s\n"
                         "L t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
                         "R t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
                         "LEG ok  rad  rad/s duty     V   C     A mov err\n"
@@ -38,6 +48,12 @@ namespace test
                         "  R %2" PRIu32 " %5.2f %+6.2f %+5.2f %5.2f %3" PRIu32
                         " %+5.2f  %" PRIu32 "  %02" PRIX32 "\n"
                         "last_us L=%12" PRIu64 " R=%12" PRIu64 "\033[J",
+                        ARM_STATES[static_cast<uint8_t>(control_status.state)],
+                        control_status.pitch_rad,
+                        control_status.speed_m_s,
+                        control_status.upright_ms,
+                        snapshot.imu.timestamp_us,
+                        snapshot.imu.gyro[1],
                         snapshot.left_encoder.timestamp_us,
                         snapshot.left_encoder.full_count,
                         snapshot.left_encoder.speed_mrad_s,

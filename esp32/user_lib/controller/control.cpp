@@ -1,7 +1,6 @@
 #include "control.h"
 
 #include "balance.h"
-#include "hw/leg_servo.h"
 #include "hw/motor.h"
 #include "hw/sensor.h"
 #include "sys_time.h"
@@ -20,71 +19,24 @@ namespace control
         constexpr uint64_t IMU_TIMEOUT_US = 15000;
         constexpr float ARM_PITCH_RAD = 0.15f;
         constexpr float TRIP_PITCH_RAD = 0.5f;
-        constexpr float ARM_SPEED_M_S = 0.1f;
         constexpr uint32_t ARM_TICKS = 100;
-        constexpr int16_t LEFT_POSITION = 2088;
-        constexpr int16_t RIGHT_POSITION = 2008;
-        constexpr float RAD_PER_COUNT = 6.2831853f / 4096.0f;
-        constexpr float PI = 3.14159265f;
 
         balance::config settings;
         motor::directions motor_directions;
+        portMUX_TYPE status_lock = portMUX_INITIALIZER_UNLOCKED;
+        status latest_status;
         bool started = false;
 
         /**
-         * @brief 根据旧机构标定曲线估计腿长
+         * @brief 发布本周期控制状态
          *
-         * @param[in] position_rad 舵机位置，单位 rad
-         *
-         * @return 腿长，单位 m
+         * @param[in] next 新状态
          */
-        float leg_height(float position_rad)
+        void publish_status(const status &next)
         {
-            const float distance = fabsf(position_rad - PI) / RAD_PER_COUNT;
-            return ((4.6289047954e-12f * distance - 9.3936274976e-08f) *
-                distance + 1.5357902969e-04f) * distance +
-                4.2041568108e-02f;
-        }
-
-        /**
-         * @brief 将双腿移动到固定原地平衡姿态
-         *
-         * @param[out] height_m 到位后的平均腿长，单位 m
-         *
-         * @return true 双腿已到位
-         * @return false 舵机命令或反馈失败
-         */
-        bool prepare_legs(float &height_m)
-        {
-            const leg_servo::command left{LEFT_POSITION, 450, 250};
-            const leg_servo::command right{RIGHT_POSITION, 450, 250};
-            if(!leg_servo::set_target(left, right) ||
-               !leg_servo::set_torque(true, true))
-            {
-                leg_servo::set_torque(false, false);
-                return false;
-            }
-
-            const uint64_t deadline = sys_time::get_us_tick() + 2000000;
-            while(sys_time::get_us_tick() < deadline)
-            {
-                leg_servo::state left_state;
-                leg_servo::state right_state;
-                if(leg_servo::read_feedback(left_state, right_state) &&
-                   fabsf(left_state.position_rad - LEFT_POSITION * RAD_PER_COUNT) <
-                       20.0f * RAD_PER_COUNT &&
-                   fabsf(right_state.position_rad - RIGHT_POSITION * RAD_PER_COUNT) <
-                       20.0f * RAD_PER_COUNT)
-                {
-                    height_m = (leg_height(left_state.position_rad) +
-                        leg_height(right_state.position_rad)) * 0.5f;
-                    return true;
-                }
-                vTaskDelay(pdMS_TO_TICKS(20));
-            }
-
-            leg_servo::set_torque(false, false);
-            return false;
+            portENTER_CRITICAL(&status_lock);
+            latest_status = next;
+            portEXIT_CRITICAL(&status_lock);
         }
 
         /**
@@ -98,6 +50,7 @@ namespace control
             uint32_t upright_ticks = 0;
             bool engaged = false;
             bool tripped = false;
+            arm_state trip_reason = arm_state::tripped_sensor;
 
             while(true)
             {
@@ -129,14 +82,15 @@ namespace control
                 {
                     engaged = false;
                     tripped = true;
+                    trip_reason = valid ? arm_state::tripped_pitch :
+                        arm_state::tripped_sensor;
                 }
 
                 if(!engaged)
                 {
                     balance::reset();
                     motor::set_target(0, 0, false);
-                    if(!tripped && valid && fabsf(pitch) < ARM_PITCH_RAD &&
-                       fabsf(speed) < ARM_SPEED_M_S)
+                    if(!tripped && valid && fabsf(pitch) < ARM_PITCH_RAD)
                     {
                         if(++upright_ticks >= ARM_TICKS){engaged = true;}
                     }
@@ -153,6 +107,7 @@ namespace control
                     {
                         engaged = false;
                         tripped = true;
+                        trip_reason = arm_state::tripped_output;
                         motor::set_target(0, 0, false);
                     }
                     else
@@ -164,16 +119,26 @@ namespace control
                     }
                 }
 
+                arm_state state = arm_state::arming;
+                if(tripped){state = trip_reason;}
+                else if(engaged){state = arm_state::active;}
+                else if(!valid){state = arm_state::wait_sensor;}
+                else if(fabsf(pitch) >= ARM_PITCH_RAD)
+                {
+                    state = arm_state::wait_pitch;
+                }
+                publish_status({state, pitch, speed, upright_ticks * PERIOD_MS});
+
                 vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PERIOD_MS));
             }
         }
     }
 
     /**
-     * @brief 准备固定腿姿并启动原地平衡任务
+     * @brief 初始化固定模型并启动原地平衡任务
      *
      * @return true 平衡任务已启动
-     * @return false 腿部准备或任务创建失败
+     * @return false 电机方向无效或任务创建失败
      */
     bool init()
     {
@@ -182,21 +147,33 @@ namespace control
         motor_directions = motor::get_directions();
         if(motor_directions.left == 0 || motor_directions.right == 0)
         {
+            publish_status({arm_state::init_failed});
             return false;
         }
 
-        float height_m = 0.0f;
-        if(!prepare_legs(height_m)){return false;}
-        balance::init(settings, height_m);
+        balance::init(settings);
 
         if(xTaskCreatePinnedToCore(task, "control", 4096, nullptr, 4,
                 nullptr, 0) != pdPASS)
         {
-            leg_servo::set_torque(false, false);
+            publish_status({arm_state::init_failed});
             return false;
         }
 
         started = true;
         return true;
+    }
+
+    /**
+     * @brief 获取最新平衡启动状态
+     *
+     * @return 控制任务最近一次发布的状态
+     */
+    status get_status()
+    {
+        portENTER_CRITICAL(&status_lock);
+        const status snapshot = latest_status;
+        portEXIT_CRITICAL(&status_lock);
+        return snapshot;
     }
 }

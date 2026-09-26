@@ -15,15 +15,15 @@ namespace balance
     }
 
     /**
-     * @brief 按固定腿长初始化原地平衡增益
+     * @brief 按固定模型高度初始化原地平衡增益
      *
      * @param[in] next_settings 平衡配置
-     * @param[in] leg_height_m 当前平均腿长，单位 m
      */
-    void init(const config &next_settings, float leg_height_m)
+    void init(const config &next_settings)
     {
         settings = next_settings;
-        const float height = fmaxf(0.02f, fminf(0.06f, leg_height_m));
+        const float height = fmaxf(0.02f,
+            fminf(0.06f, settings.model_height_m));
         for(uint32_t i = 0; i < 4; i++)
         {
             const float *poly = settings.gain_poly[i];
