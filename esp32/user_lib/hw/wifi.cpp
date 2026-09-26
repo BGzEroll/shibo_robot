@@ -192,7 +192,7 @@ namespace wifi
         char ssid[33] = {};
         char password[65] = {};
         nvs_handle_t storage;
-        if(nvs_open("wifi", NVS_READONLY, &storage) == ESP_OK)
+        if(nvs_open("shibo_wifi", NVS_READONLY, &storage) == ESP_OK)
         {
             size_t size = sizeof(ssid);
             nvs_get_str(storage, "ssid", ssid, &size);
@@ -201,8 +201,7 @@ namespace wifi
             nvs_close(storage);
         }
 
-        if(ssid[0]){esp_wifi_set_mode(WIFI_MODE_STA);}
-        else if(!start_ap()){return false;}
+        if(!start_ap()){return false;}
         if(esp_wifi_start() != ESP_OK){return false;}
         if(ssid[0]){start_station(ssid, password);}
         if(xTaskCreatePinnedToCore(task, "wifi", 3072, nullptr, 2,
@@ -266,7 +265,7 @@ namespace wifi
             return false;
         }
         nvs_handle_t storage;
-        if(nvs_open("wifi", NVS_READWRITE, &storage) != ESP_OK)
+        if(nvs_open("shibo_wifi", NVS_READWRITE, &storage) != ESP_OK)
         {
             return false;
         }
