@@ -14,7 +14,7 @@ namespace motor
         constexpr int32_t Q15_ONE = 32768;
         constexpr int32_t OUTPUT_LIMIT = 18919;
         constexpr int32_t POLE_PAIRS = 7;
-        constexpr uint32_t PWM_PEAK = 1600;     // 80 MHz / (2 * 25 kHz)
+        constexpr uint32_t PWM_PEAK = 2000;     // 80 MHz / (2 * 20 kHz)
         constexpr uint64_t ENCODER_TIMEOUT_US = 5000;
         constexpr uint64_t COMMAND_TIMEOUT_US = 20000;
         constexpr uint32_t MAX_PREDICT_US = 1000;
@@ -62,7 +62,24 @@ namespace motor
         portMUX_TYPE command_lock = portMUX_INITIALIZER_UNLOCKED;
         command target;
         mcpwm_timer_handle_t timer = nullptr;
+        TaskHandle_t task_handle = nullptr;
         bool started = false;
+
+        /**
+         * @brief 每个 PWM 周期唤醒一次 FOC 任务
+         *
+         * @return true 已唤醒高优先级任务
+         * @return false 未唤醒高优先级任务
+         */
+        bool on_pwm_empty(mcpwm_timer_handle_t,
+            const mcpwm_timer_event_data_t *, void *)
+        {
+            if(task_handle == nullptr){return false;}
+
+            BaseType_t task_woken = pdFALSE;
+            vTaskNotifyGiveFromISR(task_handle, &task_woken);
+            return task_woken == pdTRUE;
+        }
 
         /**
          * @brief Q15 正弦查表与线性插值
@@ -169,7 +186,7 @@ namespace motor
         }
 
         /**
-         * @brief 初始化双电机共用的 25 kHz 中心对齐 PWM
+         * @brief 初始化双电机共用的 20 kHz 中心对齐 PWM
          *
          * @return true 初始化成功
          * @return false PWM 资源初始化失败
@@ -235,6 +252,13 @@ namespace motor
                         return false;
                     }
                 }
+            }
+
+            mcpwm_timer_event_callbacks_t callbacks{};
+            callbacks.on_empty = on_pwm_empty;
+            if(mcpwm_timer_register_event_callbacks(timer, &callbacks, nullptr) != ESP_OK)
+            {
+                return false;
             }
 
             return mcpwm_timer_enable(timer) == ESP_OK &&
@@ -315,7 +339,7 @@ namespace motor
             if(!wait_encoder(motor, encoder, 100)){return false;}
 
             output(motor, ALIGNMENT_UQ, 0xC000);
-            sys_time::delay_us(50);     // 等待三相比较值在 PWM 零点装载。
+            sys_time::delay_us(60);     // 等待三相比较值在 PWM 零点装载。
             gpio_set_level(motor.enable_pin, 1);
             motor.enabled = true;
             if(!hold_encoder(motor, encoder, 300)){return false;}
@@ -400,20 +424,21 @@ namespace motor
             output(motor, static_cast<int32_t>(uq), electrical);
             if(!motor.enabled)
             {
-                sys_time::delay_us(50);
+                sys_time::delay_us(60);
                 gpio_set_level(motor.enable_pin, 1);
                 motor.enabled = true;
             }
         }
 
         /**
-         * @brief core 1 上持续运行的双电机 FOC 任务
+         * @brief core 1 上按 PWM 周期运行的双电机 FOC 任务
          */
         void task(void *)
         {
             sensor::package snapshot;
             while(true)
             {
+                ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
                 sensor::get_package(snapshot);
                 command current;
                 portENTER_CRITICAL(&command_lock);
@@ -443,7 +468,6 @@ namespace motor
                     disable(right);
                 }
 
-                taskYIELD();
             }
         }
     }
@@ -461,17 +485,29 @@ namespace motor
 
         const bool left_ok = calibrate(left);
         disable(left);
-        if(!left_ok){return false;}
+        if(!left_ok)
+        {
+            mcpwm_timer_start_stop(timer, MCPWM_TIMER_STOP_EMPTY);
+            return false;
+        }
 
         const bool right_ok = calibrate(right);
         disable(right);
-        if(!right_ok){return false;}
+        if(!right_ok)
+        {
+            mcpwm_timer_start_stop(timer, MCPWM_TIMER_STOP_EMPTY);
+            return false;
+        }
 
         portENTER_CRITICAL(&command_lock);
         target = command{};
         portEXIT_CRITICAL(&command_lock);
-        if(xTaskCreatePinnedToCore(task, "motor", 4096, nullptr, 5, nullptr, 1) != pdPASS)
-        {return false;}
+        if(xTaskCreatePinnedToCore(task, "motor", 4096, nullptr, 5,
+                &task_handle, 1) != pdPASS)
+        {
+            mcpwm_timer_start_stop(timer, MCPWM_TIMER_STOP_EMPTY);
+            return false;
+        }
 
         started = true;
         return true;
