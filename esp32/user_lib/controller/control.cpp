@@ -21,16 +21,15 @@ namespace control
         constexpr uint32_t PERIOD_MS = 1;
         constexpr uint64_t ENCODER_TIMEOUT_US = 5000;
         constexpr uint64_t IMU_TIMEOUT_US = 15000;
-        constexpr float ARM_PITCH_RAD = 0.15f;
         constexpr float TRIP_PITCH_RAD = 0.5f;
         constexpr float MAX_LINEAR_M_S = 0.6f;
         constexpr float MAX_YAW_RAD_S = 2.0f;
         constexpr float AXIS_DEADBAND = 0.05f;
 
-        enum class mode : uint8_t {boot, balance, sit, jump, recover, stop};
+        enum class mode : uint8_t {boot, balance, sit, stand, jump, recover, stop};
         enum class phase : uint8_t
         {
-            prepare, moving, done, stand, calibrate, push, fly, land
+            prepare, moving, done, calibrate, push, fly, land
         };
 
         struct runtime
@@ -39,7 +38,7 @@ namespace control
             phase sit = phase::prepare;
             uint64_t phase_us = 0;
             uint64_t stable_us = 0;
-            bool leg_torque_on = true;
+            bool leg_torque_on = false;
             phase jump = phase::prepare;
             int8_t linear_dir = 0;
             int8_t turn_dir = 0;
@@ -197,7 +196,8 @@ namespace control
 
                 if(run.current != mode::boot && run.current != mode::stop &&
                     (!fresh || !pad_ready ||
-                    (run.current != mode::sit && fabsf(pitch) > TRIP_PITCH_RAD)))
+                    ((run.current == mode::balance || run.current == mode::jump) &&
+                        fabsf(pitch) > TRIP_PITCH_RAD)))
                 {
                     run.current = mode::stop;
                     sit_ready = false;
@@ -222,15 +222,17 @@ namespace control
                     motor::set_target(0, 0, false);
 
                     if((pressed & gamepad::button::RB) &&
-                        !(pressed & gamepad::button::START) && fresh && pad_ready &&
-                        fabsf(pitch) < ARM_PITCH_RAD)
+                        !(pressed & gamepad::button::START) && fresh && pad_ready)
                     {
                         if(!run.leg_torque_on)
                         {
                             leg::torque(true);
                             run.leg_torque_on = true;
                         }
-                        run.current = mode::balance;
+                        leg::reset();
+                        leg::pose(2088, 2008, 450, 250);
+                        run.current = mode::stand;
+                        run.phase_us = now_us;
                         tripped = false;
                     }
                 }
@@ -285,7 +287,7 @@ namespace control
                             run.leg_torque_on = true;
                             leg::reset();
                             leg::pose(2088, 2008, 450, 250);
-                            run.sit = phase::stand;
+                            run.current = mode::stand;
                             run.phase_us = now_us;
                         }
                     }
@@ -310,16 +312,16 @@ namespace control
                             sit_ready = true;
                         }
                     }
-                    else if(run.sit == phase::stand)
+                }
+                else if(run.current == mode::stand)
+                {
+                    motor::set_target(0, 0, false);
+                    if(now_us - run.phase_us >= 350000)
                     {
-                        motor::set_target(0, 0, false);
-                        if(elapsed >= 350000)
-                        {
-                            balance::reset();
-                            run.current = mode::recover;
-                            run.phase_us = now_us;
-                            run.stable_us = 0;
-                        }
+                        balance::reset();
+                        run.current = mode::recover;
+                        run.phase_us = now_us;
+                        run.stable_us = 0;
                     }
                 }
                 else
@@ -522,11 +524,6 @@ namespace control
                 }
                 else if(!fresh){state = arm_state::wait_sensor;}
                 else if(!pad_ready){state = arm_state::wait_gamepad;}
-                else if(fabsf(pitch) >= ARM_PITCH_RAD)
-                {
-                    state = arm_state::wait_pitch;
-                }
-
                 publish_status({state, pitch, speed});
 
                 vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(PERIOD_MS));

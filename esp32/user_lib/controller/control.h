@@ -11,7 +11,6 @@ namespace control
         init_failed,
         wait_sensor,
         wait_gamepad,
-        wait_pitch,
         wait_button,
         active,
         tripped_sensor,

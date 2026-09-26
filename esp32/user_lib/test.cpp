@@ -20,7 +20,7 @@ namespace test
         constexpr const char *ARM_STATES[] =
         {
             "PREPARING", "INIT_FAILED", "WAIT_SENSOR", "WAIT_GAMEPAD",
-            "WAIT_PITCH", "WAIT_BUTTON", "ACTIVE", "TRIP_SENSOR",
+            "WAIT_BUTTON", "ACTIVE", "TRIP_SENSOR",
             "TRIP_GAMEPAD", "TRIP_PITCH"
         };
 

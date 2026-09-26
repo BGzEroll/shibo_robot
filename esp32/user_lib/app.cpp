@@ -27,5 +27,5 @@ extern "C" void app_init(void)
     web::init();
     control::init();
 
-    test::init();
+    // test::init();
 }
