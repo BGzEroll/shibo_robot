@@ -1,7 +1,17 @@
-idf_component_register(SRCS "main.c" "../user_lib/app.cpp" "../user_lib/sys_time.cpp"
+idf_component_register(SRCS "main.c" "../user_lib/app.cpp" "../user_lib/config.cpp"
+                             "../user_lib/sys_time.cpp"
                              "../user_lib/hw/sensor.cpp" "../user_lib/hw/motor.cpp"
-                             "../user_lib/hw/leg_servo.cpp"
+                             "../user_lib/hw/leg_servo.cpp" "../user_lib/hw/leg.cpp"
+                             "../user_lib/hw/aux_servo.cpp" "../user_lib/hw/battery.cpp"
+                             "../user_lib/hw/gamepad.cpp" "../user_lib/hw/gamepad_report.cpp"
                              "../user_lib/controller/control.cpp"
                              "../user_lib/controller/balance.cpp"
+                             "../user_lib/controller/action.cpp" "../user_lib/controller/input.cpp"
+                             "../user_lib/io/host.cpp" "../user_lib/io/web.cpp"
                              "../user_lib/test.cpp"
-                    INCLUDE_DIRS "." "../user_lib")
+                    INCLUDE_DIRS "." "../user_lib"
+                    REQUIRES esp_adc esp_driver_gpio esp_driver_i2c esp_driver_uart
+                             esp_driver_mcpwm esp_driver_ledc esp_driver_rmt
+                             esp_timer esp_http_server esp_wifi esp_netif esp_event
+                             esp_hid bt nvs_flash espressif__cjson
+                    EMBED_FILES "../user_lib/io/index.html")

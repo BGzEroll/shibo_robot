@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SHIBO 参数配置</title>
+<style>
+:root{font:15px system-ui;color:#243347;background:#f2f5f8}*{box-sizing:border-box}body{max-width:1080px;margin:32px auto;padding:0 18px}h1{font-size:26px}h2{font-size:18px;margin-top:0}.card{background:#fff;border:1px solid #dae2ec;border-radius:12px;padding:20px;margin:16px 0}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}label{display:flex;flex-direction:column;gap:5px}input,textarea,select{font:inherit;padding:8px;border:1px solid #c3cddd;border-radius:6px;min-width:0}input[type=checkbox]{width:20px;height:20px}button{font:inherit;padding:10px 16px;border:0;border-radius:7px;background:#255aa8;color:white;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.secondary{background:#e4ebf4;color:#243347}.actions{display:flex;gap:10px;flex-wrap:wrap}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px}td input{width:100%;font:13px ui-monospace,monospace}textarea{width:100%;height:160px;font:13px ui-monospace,monospace}.muted{color:#617088;font-size:13px}#message{min-height:24px;color:#255aa8}#status{white-space:pre-line}.scroll{overflow:auto}#gains{min-width:640px}
+</style>
+<h1>SHIBO 参数配置</h1>
+<p class="muted">先用手柄 Start 停止小车，再保存参数。保存后自动重启，重新按 RB 才会起身。</p>
+<div class="card"><h2>运行状态</h2><div id="status">正在读取…</div><p id="devices" class="muted"></p></div>
+<form id="form">
+<div id="groups"></div>
+<div class="card"><h2>LQR 高度增益 gain_poly</h2><p class="muted">高度单位 m，轮序为左、右；每项系数依次为 h³、h²、h、常数。六项状态为俯仰角、俯仰角速度、线速度误差、偏航速度误差、线速度误差积分、偏航速度误差积分。</p><label>车轮<select id="side"><option value="0">左轮</option><option value="1">右轮</option></select></label><div class="scroll"><table id="gains"></table></div></div>
+<div class="card"><h2>导入 / 导出 JSON</h2><p class="muted">可导入 MATLAB 生成的增益 JSON 或完整配置。导入后检查参数，再保存。导出文件包含网络密码。</p><textarea id="json" spellcheck="false" placeholder="在这里粘贴 JSON"></textarea><div class="actions"><button type="button" id="import" class="secondary">导入到表单</button><button type="button" id="export" class="secondary">导出当前表单</button><button type="button" id="defaults" class="secondary">载入默认值</button></div></div>
+<div class="actions"><button type="submit" id="save">保存并重启</button><button type="button" id="reload" class="secondary">重新读取</button></div><p id="message" role="status"></p>
+</form>
+<script>
+let config,selectedSide=0;
+const $=id=>document.getElementById(id);
+const numberText=(n,digits=7)=>String(Number(n.toPrecision(digits)));
+const titles={balance:'平衡模型',motor:'电机力矩换算',motion:'行驶与电池',leg:'腿部姿态',network:'网络与手柄'};
+const labels={wheel_radius_m:'轮半径 (m)',model_height_m:'固定质心高度 (m)',height_min_m:'增益最小高度 (m)',height_max_m:'增益最大高度 (m)',pitch_offset_rad:'俯仰零偏 (rad)',torque_scale:'力矩调试比例',reference_filter_s:'速度参考滤波 (s)',linear_integral_limit_m:'线速度积分限幅 (m)',yaw_integral_limit_rad:'偏航积分限幅 (rad)',phase_resistance_ohm:'单相电阻 (Ω)',kt_Nm_A:'转矩常数 Kt (N·m/A)',ke_V_s_rad:'反电动势常数 Ke (V·s/rad)',bus_voltage_V:'母线电压 (V)',torque_limit_Nm:'单轮力矩限幅 (N·m)',max_linear_m_s:'最大线速度 (m/s)',max_yaw_rad_s:'最大转向速度 (rad/s)',arm_pitch_rad:'起身俯仰范围 (rad)',trip_pitch_rad:'跌倒俯仰阈值 (rad)',battery_low_V:'低电阈值 (V)',battery_recover_V:'低电恢复阈值 (V)',roll_p:'横滚 P',roll_i:'横滚 I',roll_d:'横滚 D',roll_limit_count:'横滚输出限幅 (舵机计数)',height_com_scale:'腿长到质心高度比例',height_com_offset_m:'质心高度偏移 (m)',height_feedback:'使用舵机反馈调度高度',height_poly:'舵机计数到腿长系数',wifi_ssid:'连接 Wi-Fi 名称（留空仅热点）',wifi_password:'Wi-Fi 密码',gamepad_address:'Xbox MAC（留空自动连接扫描到的 Xbox）'};
+const states=['俯仰角','俯仰角速度','线速度误差','偏航速度误差','线速度误差积分','偏航速度误差积分'];
+const modes=['起身','平衡','坐下','跳跃','停止','原地踢球','追球踢球','中位校准'];
+const arm=['初始化','初始化失败','等待传感器','等待扶正','准备使能','已使能','反馈故障','跌倒停机','停止','等待遥控输入','低电或电池未就绪'];
+async function api(url,options){const r=await fetch(url,options);if(!r.ok)throw Error(await r.text());return r.json()}
+function gainTable(){const table=$('gains');table.replaceChildren();const tr=document.createElement('tr');for(const title of ['状态','h³','h²','h','常数']){const th=document.createElement('th');th.textContent=title;tr.append(th)}table.append(tr);config.balance.gain_poly[selectedSide].forEach((row,i)=>{const tr=document.createElement('tr');const td=document.createElement('td');td.textContent=states[i];tr.append(td);row.forEach((n,j)=>{const td=document.createElement('td'),input=document.createElement('input');input.type='number';input.step='any';input.required=true;input.value=numberText(n,9);input.dataset.row=i;input.dataset.col=j;td.append(input);tr.append(td)});table.append(tr)})}
+function readGains(){for(const e of $('gains').querySelectorAll('input'))config.balance.gain_poly[selectedSide][Number(e.dataset.row)][Number(e.dataset.col)]=Number(e.value)}
+function render(){const groups=$('groups');groups.replaceChildren();for(const [group,title] of Object.entries(titles)){const card=document.createElement('div');card.className='card';const h=document.createElement('h2');h.textContent=title;card.append(h);const fields=document.createElement('div');fields.className='fields';for(const [key,value] of Object.entries(config[group])){if(key==='gain_poly')continue;const label=document.createElement('label');label.textContent=labels[key]||key;const input=document.createElement('input');input.dataset.group=group;input.dataset.key=key;input.dataset.kind=Array.isArray(value)?'array':typeof value;input.type=typeof value==='boolean'?'checkbox':typeof value==='number'?'number':key==='wifi_password'?'password':'text';if(input.type==='checkbox')input.checked=value;else input.value=Array.isArray(value)?JSON.stringify(value.map(n=>Number(n.toPrecision(9)))):typeof value==='number'?numberText(value):value;if(input.type==='number'){input.step='any';input.required=true}label.append(input);fields.append(label)}card.append(fields);groups.append(card)}gainTable()}
+function read(){readGains();for(const e of $('groups').querySelectorAll('input'))config[e.dataset.group][e.dataset.key]=e.dataset.kind==='boolean'?e.checked:e.dataset.kind==='number'?Number(e.value):e.dataset.kind==='array'?JSON.parse(e.value):e.value;return config}
+function merge(target,source){for(const [key,value] of Object.entries(source)){if(value&&typeof value==='object'&&!Array.isArray(value)){if(!target[key])throw Error('未知参数组 '+key);merge(target[key],value)}else{if(!(key in target))throw Error('未知参数 '+key);target[key]=value}}}
+function check(value){if(value.version!==1)throw Error('配置版本必须为 1');if(!Array.isArray(value.balance.gain_poly)||value.balance.gain_poly.length!==2||value.balance.gain_poly.some(s=>!Array.isArray(s)||s.length!==6||s.some(r=>!Array.isArray(r)||r.length!==4||r.some(n=>typeof n!=='number'||!Number.isFinite(n)))))throw Error('gain_poly 必须为 2×6×4 有限数值数组')}
+function message(text){$('message').textContent=text}
+async function reload(){config=await api('/api/config');selectedSide=Number($('side').value);render()}
+$('side').onchange=()=>{readGains();selectedSide=Number($('side').value);gainTable()};
+$('reload').onclick=()=>reload().then(()=>message('已重新读取')).catch(e=>message(e.message));
+$('defaults').onclick=()=>api('/api/defaults').then(v=>{config=v;render();message('默认值已载入，尚未保存')}).catch(e=>message(e.message));
+$('import').onclick=()=>{try{const next=structuredClone(read());merge(next,JSON.parse($('json').value));check(next);config=next;render();message('已导入到表单，尚未保存')}catch(e){message(e.message)}};
+$('export').onclick=()=>{try{$('json').value=JSON.stringify(read(),null,2);const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([$('json').value],{type:'application/json'}));a.download='shibo-config.json';a.click();URL.revokeObjectURL(a.href)}catch(e){message(e.message)}};
+$('form').onsubmit=async e=>{e.preventDefault();$('save').disabled=true;try{const next=read();check(next);await api('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(next)});message('已保存，正在重启。等待约 15 秒后刷新页面。')}catch(e){message(e.message);$('save').disabled=false}};
+async function poll(){try{const s=await api('/api/status');$('status').textContent=`${modes[s.mode]} · ${arm[s.state]} · ${s.enabled?'轮电机已使能':'轮电机关闭'}\n俯仰 ${s.pitch_rad.toFixed(3)} rad　速度 ${s.speed_m_s.toFixed(3)} m/s　质心高度 ${s.height_m.toFixed(3)} m\n目标力矩 L ${s.left_torque_Nm.toFixed(4)} / R ${s.right_torque_Nm.toFixed(4)} N·m　电池 ${s.battery_V.toFixed(2)} V\n手柄 ${s.gamepad?'已连接':'未连接'}　视觉 ${s.vision?'有效':'无目标'}　腿部中位校准 ${s.calibrated?'已发送成功':'未完成'}`;$('devices').textContent='扫描到的手柄：'+(s.devices.map(d=>`${d.name} (${d.address}, ${d.rssi} dBm)`).join('；')||'暂无；打开手柄配对模式后等待扫描')}catch(e){$('status').textContent='设备暂时不可访问'}setTimeout(poll,1000)}
+reload().catch(e=>message(e.message));poll();
+</script>
+</html>

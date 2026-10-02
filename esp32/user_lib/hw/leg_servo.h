@@ -35,7 +35,7 @@ namespace leg_servo
     bool init();
     bool set_target(const command &left, const command &right);
     bool read_feedback(state &left, state &right);
-    bool set_torque(bool left_enabled, bool right_enabled);
+    bool set_torque_mode(uint8_t left_mode, uint8_t right_mode);
     bool calibrate_middle(side target);
 }
 

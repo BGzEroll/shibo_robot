@@ -1,5 +1,7 @@
 #include "motor.h"
 
+#include <algorithm>
+
 #include "hw/sensor.h"
 #include "sys_time.h"
 #include "driver/gpio.h"
@@ -22,17 +24,10 @@ namespace motor
         constexpr int32_t DIRECTION_MIN_COUNT = 41;
         constexpr uint32_t ZERO_SAMPLES = 32;
 
-        // 浮点仅用于编译期生成整数系数。
-        constexpr double PHASE_RESISTANCE = 12.27166;
-        constexpr double KT_KE = 0.0796;
-        constexpr double BUS_VOLTAGE = 7.4;
-        constexpr float ALIGNMENT_VOLTAGE = 3.0f;
-        constexpr int32_t ALIGNMENT_UQ = static_cast<int32_t>(
-            ALIGNMENT_VOLTAGE / BUS_VOLTAGE * Q15_ONE + 0.5);
-        constexpr int32_t TORQUE_GAIN_Q10 = static_cast<int32_t>(
-            PHASE_RESISTANCE / KT_KE / BUS_VOLTAGE * Q15_ONE / 1000.0 * 1024.0 + 0.5);
-        constexpr int32_t BEMF_GAIN_Q14 = static_cast<int32_t>(
-            KT_KE / BUS_VOLTAGE * Q15_ONE / 1000.0 * 16384.0 + 0.5);
+        config settings;
+        int32_t alignment_uq = 0;
+        int32_t torque_gain_q16 = 0;
+        int32_t bemf_gain_q14 = 0;
 
         struct context
         {
@@ -53,8 +48,8 @@ namespace motor
 
         struct command
         {
-            int32_t left_mNm = 0;
-            int32_t right_mNm = 0;
+            int32_t left_uNm = 0;
+            int32_t right_uNm = 0;
             uint64_t timestamp_us = 0;
             bool enabled = false;
         };
@@ -340,7 +335,7 @@ namespace motor
             sensor::encoder_data encoder;
             if(!wait_encoder(motor, encoder, 100)){return false;}
 
-            output(motor, ALIGNMENT_UQ, 0xC000);
+            output(motor, alignment_uq, 0xC000);
             sys_time::delay_us(60);     // 等待三相比较值在 PWM 零点装载。
             gpio_set_level(motor.enable_pin, 1);
             motor.enabled = true;
@@ -351,7 +346,7 @@ namespace motor
             {
                 const uint16_t phase = static_cast<uint16_t>(
                     0xC000 + step * 65536 / DIRECTION_STEPS);
-                output(motor, ALIGNMENT_UQ, phase);
+                output(motor, alignment_uq, phase);
                 vTaskDelay(pdMS_TO_TICKS(2));
                 if(!wait_encoder(motor, encoder, 20)){return false;}
             }
@@ -361,7 +356,7 @@ namespace motor
             {
                 const uint16_t phase = static_cast<uint16_t>(
                     0xC000 + static_cast<uint32_t>(step) * 65536 / DIRECTION_STEPS);
-                output(motor, ALIGNMENT_UQ, phase);
+                output(motor, alignment_uq, phase);
                 vTaskDelay(pdMS_TO_TICKS(2));
                 if(!wait_encoder(motor, encoder, 20)){return false;}
             }
@@ -381,7 +376,7 @@ namespace motor
                 return false;
             }
 
-            output(motor, ALIGNMENT_UQ, 0xC000);
+            output(motor, alignment_uq, 0xC000);
             if(!hold_encoder(motor, encoder, 300)){return false;}
 
             int64_t sum = 0;
@@ -401,11 +396,11 @@ namespace motor
          *
          * @param[in, out] motor 电机上下文
          * @param[in] encoder 编码器样本
-         * @param[in] torque_mNm 目标力矩，单位 mN·m
+         * @param[in] torque_uNm 目标力矩，单位 μN·m
          * @param[in] now_us 当前时间，单位 us
          */
         void update(context &motor, const sensor::encoder_data &encoder,
-            int32_t torque_mNm, uint64_t now_us)
+            int32_t torque_uNm, uint64_t now_us)
         {
             const uint32_t age_us = static_cast<uint32_t>(
                 now_us - encoder.timestamp_us > MAX_PREDICT_US ?
@@ -418,8 +413,8 @@ namespace motor
                 motor.direction * POLE_PAIRS * static_cast<int32_t>(mechanical) - motor.zero_phase);
 
             int64_t uq =
-                (static_cast<int64_t>(torque_mNm) * TORQUE_GAIN_Q10 >> 10) +
-                (static_cast<int64_t>(motor.direction) * encoder.speed_mrad_s * BEMF_GAIN_Q14 >> 14);
+                (static_cast<int64_t>(torque_uNm) * torque_gain_q16 >> 16) +
+                (static_cast<int64_t>(motor.direction) * encoder.speed_mrad_s * bemf_gain_q14 >> 14);
             if(uq > OUTPUT_LIMIT){uq = OUTPUT_LIMIT;}
             else if(uq < -OUTPUT_LIMIT){uq = -OUTPUT_LIMIT;}
 
@@ -461,8 +456,8 @@ namespace motor
 
                 if(active)
                 {
-                    update(left, snapshot.left_encoder, current.left_mNm, now_us);
-                    update(right, snapshot.right_encoder, current.right_mNm, now_us);
+                    update(left, snapshot.left_encoder, current.left_uNm, now_us);
+                    update(right, snapshot.right_encoder, current.right_uNm, now_us);
                 }
                 else
                 {
@@ -480,9 +475,15 @@ namespace motor
      * @return true 初始化成功
      * @return false PWM、校准或任务创建失败
      */
-    bool init()
+    bool init(const config &next_settings)
     {
         if(started){return true;}
+        settings = next_settings;
+        alignment_uq = static_cast<int32_t>(3.0f / settings.bus_voltage_V * Q15_ONE + 0.5f);
+        torque_gain_q16 = static_cast<int32_t>(settings.phase_resistance_ohm /
+            settings.kt_Nm_A / settings.bus_voltage_V * Q15_ONE / 1000000.0f * 65536.0f + 0.5f);
+        bemf_gain_q14 = static_cast<int32_t>(settings.ke_V_s_rad /
+            settings.bus_voltage_V * Q15_ONE / 1000.0f * 16384.0f + 0.5f);
         if(!init_pwm()){return false;}
 
         const bool left_ok = calibrate(left);
@@ -528,16 +529,17 @@ namespace motor
     /**
      * @brief 提交左右电机力矩目标与使能状态
      *
-     * @param[in] left_mNm 左电机目标力矩，单位 mN·m
-     * @param[in] right_mNm 右电机目标力矩，单位 mN·m
+     * @param[in] left_uNm 左电机目标力矩，单位 μN·m
+     * @param[in] right_uNm 右电机目标力矩，单位 μN·m
      * @param[in] enabled 是否使能输出
      */
-    void set_target(int32_t left_mNm, int32_t right_mNm, bool enabled)
+    void set_target(int32_t left_uNm, int32_t right_uNm, bool enabled)
     {
         const uint64_t now_us = sys_time::get_us_tick();
         portENTER_CRITICAL(&command_lock);
-        target.left_mNm = left_mNm;
-        target.right_mNm = right_mNm;
+        const int32_t limit = static_cast<int32_t>(settings.torque_limit_Nm * 1000000.0f);
+        target.left_uNm = std::clamp(left_uNm, -limit, limit);
+        target.right_uNm = std::clamp(right_uNm, -limit, limit);
         target.timestamp_us = now_us;
         target.enabled = enabled;
         portEXIT_CRITICAL(&command_lock);

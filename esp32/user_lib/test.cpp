@@ -3,6 +3,7 @@
 #include "controller/control.h"
 #include "hw/sensor.h"
 #include "hw/leg_servo.h"
+#include "hw/leg.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,7 +19,7 @@ namespace test
         constexpr const char *ARM_STATES[] =
         {
             "PREPARING", "INIT_FAILED", "WAIT_SENSOR", "WAIT_PITCH",
-            "ARMING", "ACTIVE", "TRIP_SENSOR", "TRIP_PITCH"
+            "ARMING", "ACTIVE", "TRIP_SENSOR", "TRIP_PITCH", "STOPPED", "WAIT_INPUT", "LOW_BATTERY"
         };
 
         void task(void *)
@@ -31,7 +32,9 @@ namespace test
             while(true)
             {
                 sensor::get_package(snapshot);
-                leg_servo::read_feedback(left_servo, right_servo);
+                const leg::package servos = leg::get();
+                left_servo = servos.left;
+                right_servo = servos.right;
                 const control::status control_status = control::get_status();
                 ESP_LOGI(
                         TAG,

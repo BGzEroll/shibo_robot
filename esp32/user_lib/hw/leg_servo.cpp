@@ -322,22 +322,23 @@ namespace leg_servo
     /**
      * @brief 分别设置左右腿舵机的扭矩使能
      *
-     * @param[in] left_enabled 左侧使能
-     * @param[in] right_enabled 右侧使能
+     * @param[in] left_mode 左侧扭矩模式，0 释放、1 使能、2 阻尼
+     * @param[in] right_mode 右侧扭矩模式
      *
      * @return true 已发送命令
      * @return false UART 未初始化或发送失败
      */
-    bool set_torque(bool left_enabled, bool right_enabled)
+    bool set_torque_mode(uint8_t left_mode, uint8_t right_mode)
     {
+        if(left_mode > 2 || right_mode > 2){return false;}
         if(!uart::ready()){return false;}
 
         uint8_t frame[12] =
         {
             0xFF, 0xFF, BROADCAST_ID, 8, SYNC_WRITE,
             TORQUE_ENABLE, 1,
-            LEFT_ID, static_cast<uint8_t>(left_enabled),
-            RIGHT_ID, static_cast<uint8_t>(right_enabled),
+            LEFT_ID, left_mode,
+            RIGHT_ID, right_mode,
             0
         };
         return send(frame, sizeof(frame));
