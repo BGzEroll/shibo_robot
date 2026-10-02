@@ -1,0 +1,178 @@
+clear; clc; close all;
+
+%% ===== 1. 固定物理参数 =====
+M = 0.4011 - 2 * 0.0594;
+m = 2 * 0.0594;
+R = 0.0526 / 2;
+Iw = 4.746798874999999e-06;
+Idelta = 2.924000000000000e-04;
+D = 0.1142 / 2;
+
+lat = 114;      % 经度
+g = 9.7803253359 * ...
+    (1 + 0.00193185265241 * sin(deg2rad(lat))^2) / ...
+    sqrt(1 - 0.00669437999013 * sin(deg2rad(lat))^2);
+
+%% ===== 2. L 采样范围 =====
+L_vec = linspace(0.03, 0.1, 2000);   % 质心到驱动轮轴距离采样范围
+
+n_L = length(L_vec);
+
+%% ===== 3. 存储 K =====
+K_all = zeros(2,6,n_L);
+
+%% ===== 4. LQR 权重 =====
+Q_stand = diag([
+    1 / (deg2rad(3))^2, ...
+    1 / (deg2rad(100))^2, ...
+    1 / (0.1)^2, ...
+    1 / (1)^2, ...
+    1 / (deg2rad(5))^2, ...
+    1 / (deg2rad(160))^2
+]);
+
+R_stand = 1 / (0.18)^2 * eye(2);
+
+Q_jump = diag([
+    1 / (deg2rad(2))^2, ...
+    1 / (deg2rad(60))^2, ...
+    1 / (0.5)^2, ...
+    1 / (1)^2, ...
+    1 / (deg2rad(5))^2, ...
+    1 / (deg2rad(160))^2
+]);
+
+R_jump = 1 / (1)^2 * eye(2);
+
+Q = Q_stand;
+R_mat = R_jump;
+
+%% ===== 5. 主循环 =====
+for i = 1:n_L
+    
+    L = L_vec(i);
+
+    % ===== Itheta = J(L) =====
+    Itheta = -2.744337e-02*L^3 ...
+           + 3.242604e-01*L^2 ...
+           - 1.028792e-04*L ...
+           + 2.998837e-04;
+
+    % ===== 公共分母 =====
+    Den = 2*Itheta*Iw + 2*Iw*L^2*M + Itheta*M*R^2 ...
+        + 2*Itheta*R^2*m + 2*L^2*M*R^2*m;
+
+    %% ===== A矩阵 =====
+    A = zeros(6);
+
+    A(1,2) = 1;
+    A(2,1) = (L*M*g*(2*Iw + M*R^2 + 2*R^2*m)) / Den;
+
+    A(3,4) = 1;
+    A(4,1) = -(L^2*M^2*R^2*g) / Den;
+
+    A(5,6) = 1;
+
+    %% ===== B矩阵 =====
+    B = zeros(6,2);
+
+    B(2,1) = -(2*Iw + M*R^2 + 2*R^2*m + L*M*R) / Den;
+    B(2,2) = B(2,1);
+
+    B(4,1) = (R*(M*L^2 + M*R*L + Itheta)) / Den;
+    B(4,2) = B(4,1);
+
+    B(6,1) =  (D*R)/(m*D^2*R^2 + Iw*D^2 + 2*Idelta*R^2);
+    B(6,2) = -(D*R)/(m*D^2*R^2 + Iw*D^2 + 2*Idelta*R^2);
+
+    %% ===== LQR =====
+    K = lqr(A,B,Q,R_mat);
+
+    K_all(:,:,i) = K;
+end
+
+%% ===== 6. 对 K(L) 做三次拟合 =====
+% K 是 2x6，每个元素都拟合一个三次多项式
+
+K_poly = cell(2,6);
+
+for r = 1:2
+    for c = 1:6
+        
+        y = squeeze(K_all(r,c,:));   % 取该元素随 L 的变化
+        
+        p = polyfit(L_vec, y, 3);    % 三次拟合
+        
+        K_poly{r,c} = p;
+    end
+end
+
+%% ===== 7. 可视化检查（所有元素）=====
+figure;
+tiledlayout(2,6,'TileSpacing','Compact','Padding','Compact');
+
+for r = 1:2
+    for c = 1:6
+        nexttile;
+        
+        y_true = squeeze(K_all(r,c,:));
+        p = K_poly{r,c};
+        y_fit = polyval(p, L_vec);
+
+        plot(L_vec, y_true, '.'); hold on;
+        plot(L_vec, y_fit, '-', 'LineWidth', 1.2);
+        grid on;
+
+        title(sprintf('K(%d,%d)', r, c));
+
+        if r == 2
+            xlabel('L (m)');
+        end
+        if c == 1
+            ylabel('K值');
+        end
+    end
+end
+
+sgtitle('所有 K 元素拟合效果');
+
+%% ===== MCU表达式打印（连续、只标左右轮）=====
+fprintf('\n===== MCU表达式（左右轮顺序）=====\n\n');
+
+wheel_name = {'L', 'R'};  % 左轮/右轮
+
+for r = 1:2
+    for c = 1:6
+        p = K_poly{r,c};   % [a3 a2 a1 a0]
+
+        fprintf('float K_%s%d =\t%.8ff*h*h*h + %.8ff*h*h + %.8ff*h + %.8ff;\n', ...
+            wheel_name{r}, c, p(1), p(2), p(3), p(4));
+    end
+end
+
+fprintf('\n===== MCU数组格式（先R后L，可直接复制）=====\n\n');
+
+fprintf('{\n');
+
+order = [2, 1];   % 关键：先R(2)，再L(1)
+
+for rr = 1:2
+    r = order(rr);   % 按新顺序取行
+
+    for c = 1:6
+        
+        p = K_poly{r,c};   % [a3 a2 a1 a0]
+
+        fprintf('    { % .8ff, % .8ff, % .8ff, % .8ff}', ...
+            p(1), p(2), p(3), p(4));
+
+        % 控制逗号
+        if ~(rr == 2 && c == 6)
+            fprintf(',');
+        end
+
+        fprintf('\n');
+    end
+end
+
+fprintf('};\n');
