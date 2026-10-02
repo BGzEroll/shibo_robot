@@ -9,7 +9,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -32,21 +31,37 @@ namespace gamepad
         ble_addr_t candidate;
         bool candidate_found = false;
 
+        /**
+         * @brief NimBLE 同步完成后取得本机地址类型并通知连接任务
+         */
         void on_sync()
         {
             if(ble_hs_id_infer_auto(0, &own_address_type) == 0){xSemaphoreGive(synced);}
         }
 
-        /** @brief 扫描 Xbox 广播并将地址列表提供给配置网页 */
+        /**
+         * @brief 处理 Xbox 广播并将设备列表提供给配置网页
+         *
+         * @param[in] event BLE 扫描事件
+         *
+         * @return 0，不中断 GAP 事件处理
+         */
         int scan_event(ble_gap_event *event, void *)
         {
-            if(event->type == BLE_GAP_EVENT_DISC_COMPLETE){xSemaphoreGive(scan_done); return 0;}
+            if(event->type == BLE_GAP_EVENT_DISC_COMPLETE)
+            {
+                xSemaphoreGive(scan_done);
+
+                return 0;
+            }
             if(event->type != BLE_GAP_EVENT_DISC){return 0;}
+
             ble_hs_adv_fields fields{};
             if(ble_hs_adv_parse_fields(&fields, event->disc.data, event->disc.length_data) != 0)
             {
                 return 0;
             }
+
             device found;
             const uint8_t *address = event->disc.addr.val;
             snprintf(found.address, sizeof(found.address), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -56,6 +71,7 @@ namespace gamepad
                 const size_t length = std::min<size_t>(fields.name_len, sizeof(found.name) - 1);
                 memcpy(found.name, fields.name, length);
             }
+
             found.rssi = event->disc.rssi;
             const bool xbox = strstr(found.name, "Xbox") != nullptr;
             const char *configured = config::get().gamepad_address;
@@ -72,18 +88,25 @@ namespace gamepad
                 }
                 portEXIT_CRITICAL(&lock);
             }
+
             if(selected && event->disc.event_type != BLE_HCI_ADV_RPT_EVTYPE_NONCONN_IND)
             {
                 candidate = event->disc.addr;
                 candidate_found = true;
             }
+
             return 0;
         }
 
-        /** @brief HID 生命周期回调，只在收到实际输入通知时更新时间戳 */
+        /**
+         * @brief 处理 HID 连接和输入事件，仅在收到有效报告时更新时间戳
+         *
+         * @param[in] event HID 事件编号
+         * @param[in] data HID 事件数据
+         */
         void hid_event(void *, esp_event_base_t, int32_t event, void *data)
         {
-            const auto *value = static_cast<esp_hidh_event_data_t *>(data);
+            const esp_hidh_event_data_t *value = static_cast<esp_hidh_event_data_t *>(data);
             if(event == ESP_HIDH_OPEN_EVENT)
             {
                 portENTER_CRITICAL(&lock);
@@ -113,13 +136,18 @@ namespace gamepad
             }
         }
 
+        /**
+         * @brief 运行 NimBLE 协议栈任务并在退出时释放任务资源
+         */
         void host_task(void *)
         {
             nimble_port_run();
             nimble_port_freertos_deinit();
         }
 
-        /** @brief 在低优先级任务中扫描和连接，保持主控制任务不受阻塞 */
+        /**
+         * @brief 在低优先级任务中扫描、连接手柄并发送连接振动提示
+         */
         void task(void *)
         {
             xSemaphoreTake(synced, portMAX_DELAY);
@@ -141,7 +169,8 @@ namespace gamepad
                                 candidate.val, ESP_HID_TRANSPORT_BLE, candidate.type);
                             size_t count = 0;
                             esp_hid_report_item_t *reports = nullptr;
-                            if(device != nullptr && esp_hidh_dev_reports_get(device, &count, &reports) == ESP_OK)
+                            if(device != nullptr &&
+                               esp_hidh_dev_reports_get(device, &count, &reports) == ESP_OK)
                             {
                                 // Xbox 连接成功后振动 1 秒，由手柄自身计时停止。
                                 uint8_t vibration[8] = {0x0F, 0, 0, 50, 50, 100, 0, 0};
@@ -160,31 +189,50 @@ namespace gamepad
                         }
                     }
                 }
+
                 vTaskDelay(pdMS_TO_TICKS(1000));
             }
         }
     }
 
+    /**
+     * @brief 初始化 NimBLE HID 主机并启动手柄连接任务
+     *
+     * @return true 手柄连接任务已启动
+     * @return false 同步对象、协议栈或任务初始化失败
+     */
     bool init()
     {
         scan_done = xSemaphoreCreateBinary();
         synced = xSemaphoreCreateBinary();
         if(scan_done == nullptr || synced == nullptr || nimble_port_init() != ESP_OK){return false;}
+
         ble_hs_cfg.sync_cb = on_sync;
         ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
         ble_store_config_init();
+
         esp_hidh_config_t hid{};
         hid.callback = hid_event;
         hid.event_stack_size = 4096;
         if(esp_hidh_init(&hid) != ESP_OK){return false;}
+
         // Xbox 支持无输入输出配对，不要求键盘输入 PIN。
         ble_hs_cfg.sm_io_cap = BLE_HS_IO_NO_INPUT_OUTPUT;
         ble_hs_cfg.sm_bonding = 1;
         ble_hs_cfg.sm_mitm = 0;
         nimble_port_freertos_init(host_task);
+
         return xTaskCreatePinnedToCore(task, "gamepad", 6144, nullptr, 1, nullptr, 0) == pdPASS;
     }
 
+    /**
+     * @brief 获取最新手柄输入快照
+     *
+     * @param[out] out 手柄输入快照
+     *
+     * @return true 已收到有效输入报告
+     * @return false 尚无有效报告或手柄已断开
+     */
     bool get(control::remote_input &out)
     {
         portENTER_CRITICAL(&lock);
@@ -193,6 +241,12 @@ namespace gamepad
         return out.valid;
     }
 
+    /**
+     * @brief 查询手柄连接状态
+     *
+     * @return true HID 连接已建立
+     * @return false HID 未连接
+     */
     bool connected()
     {
         portENTER_CRITICAL(&lock);
@@ -201,6 +255,14 @@ namespace gamepad
         return result;
     }
 
+    /**
+     * @brief 复制扫描到的手柄设备列表
+     *
+     * @param[out] out 设备数组
+     * @param[in] capacity 数组可容纳的设备数量
+     *
+     * @return 实际复制的设备数量
+     */
     size_t get_devices(device *out, size_t capacity)
     {
         portENTER_CRITICAL(&lock);

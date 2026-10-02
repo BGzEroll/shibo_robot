@@ -64,8 +64,10 @@ namespace control
         uint32_t stream_id = 0;
         uint32_t timestamp_us = 0;
         uint16_t buttons = 0;
-        uint16_t press_count[16]{};
-        float axes[6]{};
+        uint16_t press_count[16] = {};
+
+        float axes[6] = {};
+
         bool valid = false;
     };
 
@@ -76,12 +78,16 @@ namespace control
     {
         input_source source = input_source::NONE;
         uint32_t timestamp_us = 0;
+
         float linear = 0.0f;
         float yaw = 0.0f;
+
         int8_t camera_direction = 0;
         int8_t leg_height_direction = 0;
         int8_t roll_direction = 0;
+
         action_request action = action_request::NONE;
+
         bool fresh = false;
         bool reset_leg = false;
         bool disable_leg_torque = false;

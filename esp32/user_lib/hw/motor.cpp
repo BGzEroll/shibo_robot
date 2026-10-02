@@ -1,7 +1,6 @@
 #include "motor.h"
 
 #include <algorithm>
-
 #include "hw/sensor.h"
 #include "sys_time.h"
 #include "driver/gpio.h"
@@ -471,6 +470,8 @@ namespace motor
 
     /**
      * @brief 初始化 PWM、校准双电机并启动 FOC 任务
+     *
+     * @param[in] next_settings 电机物理参数及力矩上限
      *
      * @return true 初始化成功
      * @return false PWM、校准或任务创建失败

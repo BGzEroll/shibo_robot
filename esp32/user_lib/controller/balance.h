@@ -1,22 +1,35 @@
 #ifndef BALANCE_H
 #define BALANCE_H
 
+#include <stdint.h>
+
 namespace control
 {
-    enum class balance_mode {OFF, BALANCE, DIRECT, RECOVER};
+    enum class balance_mode : uint8_t
+    {
+        OFF,
+        BALANCE,
+        DIRECT,
+        RECOVER
+    };
 
     struct balance_command
     {
         balance_mode mode = balance_mode::OFF;
+
         float linear_vel = 0.0f;
         float yaw_rate = 0.0f;
+
         float direct_left = 0.0f;
         float direct_right = 0.0f;
+
         float recover_blend = 1.0f;
+
         bool steering = false;
         bool linear_feedback = true;
         bool yaw_feedback = true;
         bool yaw_integral = true;
+
         bool reset_reference = false;
         bool reset_yaw_integral = false;
     };
@@ -54,14 +67,19 @@ namespace balance
                 {0.0f, 0.0f, 0.0f, -0.04610298946f}
             }
         };
+
         float wheel_radius_m = 0.0263f;
         float model_height_m = 0.048f;
         float height_min_m = 0.031f;
         float height_max_m = 0.082f;
+
         float pitch_offset_rad = 0.0f;
+
         // 物理力矩增益的调试比例；不用于补偿错误的电机参数。
         float torque_scale = 1.0f;
+
         float reference_filter_s = 0.08f;
+
         float linear_integral_limit_m = 0.08f;
         float yaw_integral_limit_rad = 0.30f;
     };

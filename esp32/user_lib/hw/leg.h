@@ -14,6 +14,7 @@ namespace leg
     {
         leg_servo::state left;
         leg_servo::state right;
+
         bool io_failed = false;
         bool calibrated = false;
     };

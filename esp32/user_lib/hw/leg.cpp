@@ -2,7 +2,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
 #include <algorithm>
 
 namespace leg
@@ -23,7 +22,9 @@ namespace leg
         command target;
         package latest;
 
-        /** @brief 唯一舵机串口所有者，每 10 ms 写目标、每 20 ms 读取反馈 */
+        /**
+         * @brief 作为舵机串口唯一所有者，每 10 ms 写目标、每 20 ms 读取反馈
+         */
         void task(void *)
         {
             uint32_t pose_sequence = 0;
@@ -31,11 +32,13 @@ namespace leg
             uint32_t ticks = 0;
             package state;
             TickType_t wake = xTaskGetTickCount();
+
             while(true)
             {
                 portENTER_CRITICAL(&lock);
                 const command current = target;
                 portEXIT_CRITICAL(&lock);
+
                 bool written = true;
                 if(current.torque_sequence != torque_sequence)
                 {
@@ -51,30 +54,46 @@ namespace leg
                     }
                     torque_sequence = current.torque_sequence;
                 }
+
                 if(current.pose_sequence != pose_sequence)
                 {
                     written = leg_servo::set_target(current.left, current.right) && written;
                     pose_sequence = current.pose_sequence;
                 }
+
                 if((ticks++ % 2) == 0)
                 {
                     leg_servo::read_feedback(state.left, state.right);
                 }
+
                 state.io_failed = !written;
+
                 portENTER_CRITICAL(&lock);
                 latest = state;
                 portEXIT_CRITICAL(&lock);
+
                 vTaskDelayUntil(&wake, pdMS_TO_TICKS(10));
             }
         }
     }
 
+    /**
+     * @brief 初始化腿部舵机并启动串口任务
+     *
+     * @return true 腿部任务已启动
+     * @return false 串口初始化或任务创建失败
+     */
     bool init()
     {
         return leg_servo::init() && xTaskCreatePinnedToCore(
             task, "leg", 4096, nullptr, 2, nullptr, 0) == pdPASS;
     }
 
+    /**
+     * @brief 获取缓存的左右腿反馈
+     *
+     * @return 最新腿部反馈及通信、校准状态
+     */
     package get()
     {
         portENTER_CRITICAL(&lock);
@@ -83,11 +102,20 @@ namespace leg
         return snapshot;
     }
 
+    /**
+     * @brief 在固定机构范围内提交左右腿目标位置
+     *
+     * @param[in] left 左腿位置，单位编码器计数
+     * @param[in] right 右腿位置，单位编码器计数
+     * @param[in] speed STS 舵机速度值
+     * @param[in] acceleration STS 舵机加速度值
+     */
     void set_pose(int16_t left, int16_t right, uint16_t speed, uint8_t acceleration)
     {
         // 允许坐下中位到跳跃伸展位置，禁止越过固定机构边界。
         left = std::clamp<int16_t>(left, 2048, LEG_LEFT_MAX + 20);
         right = std::clamp<int16_t>(right, LEG_RIGHT_MAX - 20, 2048);
+
         portENTER_CRITICAL(&lock);
         if(target.left.position != left || target.right.position != right ||
            target.left.speed != speed || target.right.speed != speed ||
@@ -100,6 +128,12 @@ namespace leg
         portEXIT_CRITICAL(&lock);
     }
 
+    /**
+     * @brief 提交左右腿力矩模式或中位校准请求
+     *
+     * @param[in] left 左腿模式：0 关闭、1 位置、2 阻尼、128 校准
+     * @param[in] right 右腿模式：0 关闭、1 位置、2 阻尼、128 校准
+     */
     void set_torque(uint8_t left, uint8_t right)
     {
         portENTER_CRITICAL(&lock);

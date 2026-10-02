@@ -10,6 +10,7 @@ namespace gamepad
     {
         char address[18] = {};
         char name[32] = {};
+
         int8_t rssi = 0;
     };
 

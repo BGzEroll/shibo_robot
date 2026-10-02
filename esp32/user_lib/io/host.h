@@ -10,8 +10,10 @@ namespace host
     {
         int16_t dx = 0;
         int16_t dy = 0;
+
         uint64_t timestamp_us = 0;
         uint32_t sequence = 0;
+
         bool valid = false;
     };
 

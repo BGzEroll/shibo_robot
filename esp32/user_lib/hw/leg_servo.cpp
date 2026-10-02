@@ -320,13 +320,13 @@ namespace leg_servo
     }
 
     /**
-     * @brief 分别设置左右腿舵机的扭矩使能
+     * @brief 分别设置左右腿舵机的扭矩模式
      *
      * @param[in] left_mode 左侧扭矩模式，0 释放、1 使能、2 阻尼
-     * @param[in] right_mode 右侧扭矩模式
+     * @param[in] right_mode 右侧扭矩模式，0 释放、1 使能、2 阻尼
      *
      * @return true 已发送命令
-     * @return false UART 未初始化或发送失败
+     * @return false 模式无效、UART 未初始化或发送失败
      */
     bool set_torque_mode(uint8_t left_mode, uint8_t right_mode)
     {
