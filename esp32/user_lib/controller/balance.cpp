@@ -90,14 +90,6 @@ namespace balance
                 std::clamp(command.direct_right, -torque_limit_Nm, torque_limit_Nm)};
         }
 
-        if(!std::isfinite(height_m) || !std::isfinite(pitch_rad) ||
-           !std::isfinite(pitch_rate_rad_s) || !std::isfinite(linear_speed_m_s) ||
-           !std::isfinite(yaw_rate_rad_s) || !std::isfinite(dt_s) || dt_s <= 0.0f || dt_s > 0.02f)
-        {
-            reset();
-            return {};
-        }
-
         update_gain(height_m);
         const float alpha = dt_s / (settings.reference_filter_s + dt_s);
         linear_reference += alpha * (command.linear_vel - linear_reference);
@@ -131,7 +123,7 @@ namespace balance
 
         float torque[2] = {};
         const float scale = settings.torque_scale *
-            (recovering ? std::clamp(command.recover_blend, 0.0f, 1.0f) : 1.0f);
+            (recovering ? command.recover_blend : 1.0f);
         bool saturated = false;
         for(uint32_t side = 0; side < 2; side++)
         {

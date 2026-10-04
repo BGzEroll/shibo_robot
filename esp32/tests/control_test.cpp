@@ -329,8 +329,6 @@ int32_t main()
     assert(turn.left_Nm < 0 && turn.right_Nm > 0 && fabsf(turn.left_Nm + turn.right_Nm) < 1e-7f);
     const auto saturated = balance::step(0.048f, 1, 10, 10, 10, 0.001f, command);
     assert(fabsf(saturated.left_Nm) <= 0.025f && fabsf(saturated.right_Nm) <= 0.025f);
-    const auto invalid = balance::step(0.048f, NAN, 0, 0, 0, 0.001f, command);
-    assert(invalid.left_Nm == 0 && invalid.right_Nm == 0);
 
     uint8_t report[16] = {};
     for(uint32_t i = 0; i < 4; i++){report[i * 2 + 1] = 128;}

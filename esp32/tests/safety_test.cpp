@@ -9,6 +9,7 @@
 #include "controller/input.h"
 #include "freertos/task.h"
 #include <cassert>
+#include <cmath>
 #include <cstdio>
 
 namespace
@@ -56,7 +57,7 @@ namespace sys_time
 namespace sensor
 {
     /**
-     * @brief 提供传感器快照并在指定时段注入 IMU 超时
+     * @brief 提供传感器快照并在指定时段注入超时、倾倒和异常角速度
      *
      * @param[out] out 传感器快照
      *
@@ -68,6 +69,7 @@ namespace sensor
         out.imu.timestamp_us = clock_us;
         if(tick_ms >= 3500 && tick_ms < 3510){out.imu.angle[1] = 0.6f;}
         if(tick_ms >= 740 && tick_ms < 760){out.imu.timestamp_us -= 15001;}
+        if(tick_ms == 4690){out.imu.gyro[1] = NAN;}
         out.left_encoder.timestamp_us = clock_us;
         out.right_encoder.timestamp_us = clock_us;
         return true;
@@ -89,10 +91,13 @@ namespace motor
     /**
      * @brief 记录控制任务的电机使能状态
      *
+     * @param[in] left_uNm 左轮目标力矩，单位 μN·m
+     * @param[in] right_uNm 右轮目标力矩，单位 μN·m
      * @param[in] active 是否使能输出
      */
-    void set_target(int32_t, int32_t, bool active)
+    void set_target(int32_t left_uNm, int32_t right_uNm, bool active)
     {
+        assert(std::abs(left_uNm) <= 25000 && std::abs(right_uNm) <= 25000);
         enabled = active;
     }
 }
@@ -364,7 +369,22 @@ void vTaskDelayUntil(TickType_t *, TickType_t)
         assert(!enabled && pose_updates == pose_before_trip);
         assert(control::get_status().state == control::arm_state::tripped_sensor);
     }
-    if(tick_ms == 4200)
+    if(tick_ms == 4200){assert(!enabled);}
+    if(tick_ms == 4240)
+    {
+        input.press_count[9]++;
+        input.buttons = control::buttons::RB;
+    }
+    if(tick_ms == 4250){input.buttons = 0;}
+    if(tick_ms == 4690){assert(enabled);}
+    if(tick_ms == 4691)
+    {
+        const control::status state = control::get_status();
+        assert(!enabled && state.state == control::arm_state::tripped_sensor);
+        assert(state.mode == control::mode::STOP && state.phase == 0);
+        assert(state.left_torque_Nm == 0 && state.right_torque_Nm == 0);
+    }
+    if(tick_ms == 4800)
     {
         assert(!enabled);
         throw finished{};
@@ -388,5 +408,5 @@ int32_t main()
     {
     }
     assert(!enabled);
-    puts("safety tests passed: elapsed time, stale IMU, rearm, config lock, input loss, pitch, deadline");
+    puts("safety tests passed: elapsed time, stale IMU, rearm, config lock, input loss, pitch, deadline, torque guard");
 }

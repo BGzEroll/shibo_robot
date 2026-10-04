@@ -1,6 +1,7 @@
 #include "config.h"
 #include "nvs.h"
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -140,6 +141,25 @@ int32_t main()
     for(const char *bad : invalid_configs)
     {
         json = cJSON_Parse(bad);
+        assert(!config::from_json(json, copy));
+        assert(copy.balance.pitch_offset_rad == previous);
+        cJSON_Delete(json);
+    }
+
+    // 标量和多项式范围检查仍拒绝 NaN、无穷大，并保持配置原子更新。
+    const double invalid_numbers[] = {NAN, INFINITY, -INFINITY};
+    for(double number : invalid_numbers)
+    {
+        json = cJSON_Parse("{\"balance\":{\"pitch_offset_rad\":0}}");
+        cJSON_SetNumberValue(cJSON_GetObjectItem(cJSON_GetObjectItem(json, "balance"),
+            "pitch_offset_rad"), number);
+        assert(!config::from_json(json, copy));
+        assert(copy.balance.pitch_offset_rad == previous);
+        cJSON_Delete(json);
+
+        json = cJSON_Parse("{\"leg\":{\"height_poly\":[0,0,0,0]}}");
+        cJSON_SetNumberValue(cJSON_GetArrayItem(cJSON_GetObjectItem(cJSON_GetObjectItem(json, "leg"),
+            "height_poly"), 0), number);
         assert(!config::from_json(json, copy));
         assert(copy.balance.pitch_offset_rad == previous);
         cJSON_Delete(json);

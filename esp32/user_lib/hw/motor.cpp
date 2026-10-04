@@ -1,6 +1,5 @@
 #include "motor.h"
 
-#include <algorithm>
 #include "hw/sensor.h"
 #include "sys_time.h"
 #include "driver/gpio.h"
@@ -57,7 +56,6 @@ namespace motor
         command target;
         mcpwm_timer_handle_t timer = nullptr;
         TaskHandle_t task_handle = nullptr;
-        bool started = false;
 
         /**
          * @brief 每两个 PWM 周期唤醒一次 FOC 任务
@@ -478,7 +476,6 @@ namespace motor
      */
     bool init(const config &next_settings)
     {
-        if(started){return true;}
         settings = next_settings;
         alignment_uq = static_cast<int32_t>(3.0f / settings.bus_voltage_V * Q15_ONE + 0.5f);
         torque_gain_q16 = static_cast<int32_t>(settings.phase_resistance_ohm /
@@ -509,7 +506,6 @@ namespace motor
             return false;
         }
 
-        started = true;
         return true;
     }
 
@@ -524,7 +520,7 @@ namespace motor
     }
 
     /**
-     * @brief 提交左右电机力矩目标与使能状态
+     * @brief 提交平衡控制已限幅的左右电机力矩目标与使能状态
      *
      * @param[in] left_uNm 左电机目标力矩，单位 μN·m
      * @param[in] right_uNm 右电机目标力矩，单位 μN·m
@@ -534,9 +530,8 @@ namespace motor
     {
         const uint64_t now_us = sys_time::get_us_tick();
         portENTER_CRITICAL(&command_lock);
-        const int32_t limit = static_cast<int32_t>(settings.torque_limit_Nm * 1000000.0f);
-        target.left_uNm = std::clamp(left_uNm, -limit, limit);
-        target.right_uNm = std::clamp(right_uNm, -limit, limit);
+        target.left_uNm = left_uNm;
+        target.right_uNm = right_uNm;
         target.timestamp_us = now_us;
         target.enabled = enabled;
         portEXIT_CRITICAL(&command_lock);

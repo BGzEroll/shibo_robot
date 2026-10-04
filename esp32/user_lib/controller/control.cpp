@@ -21,7 +21,6 @@ namespace control
         portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
         status latest;
         bool maintenance = false;
-        bool started = false;
         motor::directions directions;
 
         /**
@@ -88,10 +87,7 @@ namespace control
 
                 const bool sensors_ready = imu_ready && fresh(snapshot.imu.timestamp_us, now, 15000) &&
                     fresh(snapshot.left_encoder.timestamp_us, now, 5000) &&
-                    fresh(snapshot.right_encoder.timestamp_us, now, 5000) &&
-                    std::isfinite(measured.pitch_rad) && std::isfinite(measured.pitch_rate) &&
-                    std::isfinite(measured.yaw_rate) && std::isfinite(measured.yaw_angle) &&
-                    std::isfinite(measured.roll_angle) && std::isfinite(measured.avg_leg_height);
+                    fresh(snapshot.right_encoder.timestamp_us, now, 5000);
 
                 const bool leg_ready = legs.left.valid && legs.right.valid &&
                     fresh(legs.left.timestamp_us, now, 100000) && fresh(legs.right.timestamp_us, now, 100000) &&
@@ -209,8 +205,6 @@ namespace control
      */
     bool init(bool hardware_ready)
     {
-        if(started){return true;}
-
         directions = motor::get_directions();
         if(!hardware_ready || directions.left == 0 || directions.right == 0)
         {
@@ -219,7 +213,7 @@ namespace control
         }
 
         balance::init(config::get().balance);
-        started = xTaskCreatePinnedToCore(task, "control", 6144, nullptr, 4, nullptr, 0) == pdPASS;
+        const bool started = xTaskCreatePinnedToCore(task, "control", 6144, nullptr, 4, nullptr, 0) == pdPASS;
         if(!started){latest.state = arm_state::init_failed;}
         return started;
     }

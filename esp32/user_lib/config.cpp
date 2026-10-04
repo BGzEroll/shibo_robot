@@ -115,8 +115,7 @@ namespace config
             for(uint32_t i = 0; i < size; i++)
             {
                 const cJSON *item = cJSON_GetArrayItem(json, static_cast<int32_t>(i));
-                if(!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
-                   fabs(item->valuedouble) > bound){return false;}
+                if(!cJSON_IsNumber(item) || !(fabs(item->valuedouble) <= bound)){return false;}
                 out[i] = static_cast<float>(item->valuedouble);
             }
 
@@ -203,8 +202,8 @@ namespace config
             const cJSON *item = cJSON_GetObjectItemCaseSensitive(
                 cJSON_GetObjectItemCaseSensitive(json, group), field_name(name));
             if(item == nullptr){return true;}
-            if(!cJSON_IsNumber(item) || !std::isfinite(item->valuedouble) ||
-               item->valuedouble < low || item->valuedouble > high){return false;}
+            if(!cJSON_IsNumber(item) ||
+               !(item->valuedouble >= low && item->valuedouble <= high)){return false;}
             number = static_cast<float>(item->valuedouble);
             return true;
         })){return false;}
