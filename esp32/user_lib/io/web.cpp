@@ -253,7 +253,7 @@ namespace web
         httpd_handle_t server = nullptr;
         httpd_config_t http = HTTPD_DEFAULT_CONFIG();
         http.core_id = 0;
-        http.task_priority = 4;
+        http.task_priority = 3;
         http.stack_size = 6144;
         if(httpd_start(&server, &http) != ESP_OK){return false;}
 
