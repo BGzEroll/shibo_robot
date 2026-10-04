@@ -11,7 +11,7 @@ idf_component_register(SRCS "main.c" "../user_lib/app.cpp" "../user_lib/config.c
                              "../user_lib/test.cpp"
                     INCLUDE_DIRS "." "../user_lib"
                     REQUIRES esp_adc esp_driver_gpio esp_driver_i2c esp_driver_uart
-                             esp_driver_mcpwm esp_driver_ledc esp_driver_rmt
+                             esp_driver_mcpwm esp_driver_ledc
                              esp_timer esp_http_server esp_wifi esp_netif esp_event
                              esp_hid bt nvs_flash espressif__cjson
                     EMBED_FILES "../user_lib/io/index.html")

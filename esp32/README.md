@@ -54,7 +54,6 @@ Xbox 优先于上位机。Xbox 连接成功时提供一次振动反馈。连接�
 | 腿 STS3032 | UART2，TX17/RX16，1 Mbaud，ID 1/2 |
 | 摄像头/挡板 PWM 舵机 | GPIO4、GPIO15，LEDC 50 Hz，540–2600 μs |
 | 电池 | GPIO35，ADC1_CH7，分压比 3.97 |
-| 状态灯 | GPIO13；GPIO21 两颗 WS2812，RMT |
 | 上位机/视觉 | UART0，TX1/RX3，115200 baud；也用于启动日志/固定监视屏 |
 
 `motor` 和 `sensor` 在 core 1，优先级为 5；`control` 在 core 0，优先级为 4，每 1 ms 平衡、每 10 ms 更新输入和动作。core 0 的其他项目任务：HTTP 和监视屏为 3，腿部和上位机接收为 2，手柄连接与电池为 1；IDF 内部任务保留默认优先级。
