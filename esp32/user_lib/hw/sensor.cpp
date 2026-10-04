@@ -174,42 +174,21 @@ namespace i2c
     }
 
     /**
-     * @brief 发起左侧 I2C 异步读取
+     * @brief 发起传感器 I2C 异步读取
      *
+     * @param[in, out] ctx 左侧或右侧总线上下文
      * @param[in] reg 寄存器地址
      * @param[out] data 接收缓冲区
      * @param[in] size 读取长度
      */
-    void read_left(const uint8_t *reg, uint8_t *data, size_t size)
+    void read(context &ctx, const uint8_t *reg, uint8_t *data, size_t size)
     {
-        left.submit_time_us = sys_time::get_us_tick();
-        left.pending = true;
+        ctx.submit_time_us = sys_time::get_us_tick();
+        ctx.pending = true;
 
         ESP_ERROR_CHECK(
             i2c_master_transmit_receive(
-                left.dev,
-                reg,
-                1,
-                data,
-                size,
-                -1));
-    }
-
-    /**
-     * @brief 发起右侧 I2C 异步读取
-     *
-     * @param[in] reg 寄存器地址
-     * @param[out] data 接收缓冲区
-     * @param[in] size 读取长度
-     */
-    void read_right(const uint8_t *reg, uint8_t *data, size_t size)
-    {
-        right.submit_time_us = sys_time::get_us_tick();
-        right.pending = true;
-
-        ESP_ERROR_CHECK(
-            i2c_master_transmit_receive(
-                right.dev,
+                ctx.dev,
                 reg,
                 1,
                 data,
@@ -256,51 +235,17 @@ namespace i2c
     }
 
     /**
-     * @brief 检查左侧 I2C 是否超时
+     * @brief 检查传感器 I2C 是否超时
      *
+     * @param[in] ctx 左侧或右侧总线上下文
      * @param[in] now_us 当前时间
      *
      * @return true 事务超时
      * @return false 事务正常
      */
-    bool left_stalled(uint64_t now_us)
+    bool stalled(const context &ctx, uint64_t now_us)
     {
-        return left.pending &&
-            now_us - left.submit_time_us >= STALL_TIME_US;
-    }
-
-    /**
-     * @brief 检查右侧 I2C 是否超时
-     *
-     * @param[in] now_us 当前时间
-     *
-     * @return true 事务超时
-     * @return false 事务正常
-     */
-    bool right_stalled(uint64_t now_us)
-    {
-        return right.pending &&
-            now_us - right.submit_time_us >= STALL_TIME_US;
-    }
-
-    /**
-     * @brief 获取左侧 I2C 完成时间
-     *
-     * @return 事务完成时间，单位 us
-     */
-    uint64_t left_completion_time_us()
-    {
-        return left.completion_time_us;
-    }
-
-    /**
-     * @brief 获取右侧 I2C 完成时间
-     *
-     * @return 事务完成时间，单位 us
-     */
-    uint64_t right_completion_time_us()
-    {
-        return right.completion_time_us;
+        return ctx.pending && now_us - ctx.submit_time_us >= STALL_TIME_US;
     }
 }
 
@@ -419,7 +364,8 @@ namespace as5600
      */
     void start_left_read()
     {
-        i2c::read_left(
+        i2c::read(
+            i2c::left,
             &left.reg,
             left.raw,
             sizeof(left.raw));
@@ -430,38 +376,11 @@ namespace as5600
      */
     void start_right_read()
     {
-        i2c::read_right(
+        i2c::read(
+            i2c::right,
             &right.reg,
             right.raw,
             sizeof(right.raw));
-    }
-
-    /**
-     * @brief 处理左编码器数据
-     *
-     * @param[in] now_us 采样完成时间
-     *
-     * @return 左编码器数据
-     */
-    sensor::encoder_data process_left(uint64_t now_us)
-    {
-        return process(
-            left,
-            now_us);
-    }
-
-    /**
-     * @brief 处理右编码器数据
-     *
-     * @param[in] now_us 采样完成时间
-     *
-     * @return 右编码器数据
-     */
-    sensor::encoder_data process_right(uint64_t now_us)
-    {
-        return process(
-            right,
-            now_us);
     }
 }
 
@@ -597,7 +516,8 @@ namespace mpu6050
      */
     void start_read()
     {
-        i2c::read_right(
+        i2c::read(
+            i2c::right,
             &reg,
             raw,
             sizeof(raw));
@@ -766,7 +686,7 @@ namespace sensor
          */
         void handle_left_encoder()
         {
-            publish_left(as5600::process_left(i2c::left_completion_time_us()));
+            publish_left(as5600::process(as5600::left, i2c::left.completion_time_us));
             as5600::start_left_read();
         }
 
@@ -775,8 +695,8 @@ namespace sensor
          */
         void handle_right_encoder()
         {
-            const uint64_t now_us = i2c::right_completion_time_us();
-            publish_right(as5600::process_right(now_us));
+            const uint64_t now_us = i2c::right.completion_time_us;
+            publish_right(as5600::process(as5600::right, now_us));
 
             // MPU6050 到时间后插队一次
             if(now_us >= next_imu_time_us)
@@ -802,7 +722,7 @@ namespace sensor
         void handle_imu()
         {
             imu_data data;
-            if(mpu6050::process(i2c::right_completion_time_us(), data))
+            if(mpu6050::process(i2c::right.completion_time_us, data))
             {
                 publish_imu(data);
             }
@@ -855,12 +775,12 @@ namespace sensor
 
                 const uint64_t now_us = sys_time::get_us_tick();
 
-                if(i2c::left_stalled(now_us))
+                if(i2c::stalled(i2c::left, now_us))
                 {
                     as5600::start_left_read();
                 }
 
-                if(i2c::right_stalled(now_us))
+                if(i2c::stalled(i2c::right, now_us))
                 {
                     if(right_reading_imu)
                     {

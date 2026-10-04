@@ -22,7 +22,6 @@ namespace web
 {
     namespace
     {
-        httpd_handle_t server = nullptr;
         esp_timer_handle_t restart_timer = nullptr;
 
         /**
@@ -63,7 +62,7 @@ namespace web
         }
 
         /**
-         * @brief 返回本次启动加载的完整配置
+         * @brief 返回当前配置或编译时默认配置
          *
          * @param[in] request HTTP 请求
          *
@@ -71,19 +70,8 @@ namespace web
          */
         esp_err_t get_config(httpd_req_t *request)
         {
-            return send_json(request, config::to_json(config::get()));
-        }
-
-        /**
-         * @brief 返回默认参数
-         *
-         * @param[in] request HTTP 请求
-         *
-         * @return ESP_OK 响应成功；其他值表示请求处理或响应发送失败
-         */
-        esp_err_t defaults(httpd_req_t *request)
-        {
-            return send_json(request, config::to_json(config::settings{}));
+            return send_json(request, config::to_json(
+                strncmp(request->uri, "/api/defaults", 13) == 0 ? config::settings{} : config::get()));
         }
 
         /**
@@ -262,6 +250,7 @@ namespace web
         restart.name = "config_restart";
         if(esp_timer_create(&restart, &restart_timer) != ESP_OK){return false;}
 
+        httpd_handle_t server = nullptr;
         httpd_config_t http = HTTPD_DEFAULT_CONFIG();
         http.core_id = 0;
         http.task_priority = 4;
@@ -272,7 +261,7 @@ namespace web
         {
             {"/", HTTP_GET, page, nullptr},
             {"/api/config", HTTP_GET, get_config, nullptr},
-            {"/api/defaults", HTTP_GET, defaults, nullptr},
+            {"/api/defaults", HTTP_GET, get_config, nullptr},
             {"/api/config", HTTP_POST, save_config, nullptr},
             {"/api/status", HTTP_GET, status, nullptr}
         };

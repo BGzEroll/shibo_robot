@@ -487,20 +487,16 @@ namespace motor
             settings.bus_voltage_V * Q15_ONE / 1000.0f * 16384.0f + 0.5f);
         if(!init_pwm()){return false;}
 
-        const bool left_ok = calibrate(left);
-        disable(left);
-        if(!left_ok)
+        context *motors[2] = {&left, &right};
+        for(context *motor : motors)
         {
-            mcpwm_timer_start_stop(timer, MCPWM_TIMER_STOP_EMPTY);
-            return false;
-        }
-
-        const bool right_ok = calibrate(right);
-        disable(right);
-        if(!right_ok)
-        {
-            mcpwm_timer_start_stop(timer, MCPWM_TIMER_STOP_EMPTY);
-            return false;
+            const bool calibrated = calibrate(*motor);
+            disable(*motor);
+            if(!calibrated)
+            {
+                mcpwm_timer_start_stop(timer, MCPWM_TIMER_STOP_EMPTY);
+                return false;
+            }
         }
 
         portENTER_CRITICAL(&command_lock);
