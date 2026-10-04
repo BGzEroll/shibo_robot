@@ -69,7 +69,7 @@ namespace balance
      * @param[in] command 本周期平衡指令
      * @param[in] torque_limit_Nm 单轮力矩上限，单位 N·m
      *
-     * @return 限幅后的左右轮目标力矩，单位 N·m
+     * @return 限幅后的左右轮前进力矩，单位 N·m
      */
     output step(float height_m, float pitch_rad, float pitch_rate_rad_s,
         float linear_speed_m_s, float yaw_rate_rad_s, float dt_s,

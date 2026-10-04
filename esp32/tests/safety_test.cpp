@@ -23,6 +23,8 @@ namespace
     uint32_t tick_ms = 0;
     void (*control_task)(void *) = nullptr;
     bool enabled = false;
+    int32_t left_foc_uNm = 0;
+    int32_t right_foc_uNm = 0;
     uint32_t pose_updates = 0;
     uint32_t pose_before_trip = 0;
     control::remote_input input;
@@ -72,6 +74,12 @@ namespace sensor
         if(tick_ms == 4690){out.imu.gyro[1] = NAN;}
         out.left_encoder.timestamp_us = clock_us;
         out.right_encoder.timestamp_us = clock_us;
+        if(tick_ms == 4000)
+        {
+            out.imu.gyro[1] = 0.1f;
+            out.left_encoder.speed_mrad_s = settings.left_wheel_direction * 1000;
+            out.right_encoder.speed_mrad_s = -settings.right_wheel_direction * 2000;
+        }
         return true;
     }
 }
@@ -99,6 +107,8 @@ namespace motor
     {
         assert(std::abs(left_uNm) <= 25000 && std::abs(right_uNm) <= 25000);
         enabled = active;
+        left_foc_uNm = left_uNm;
+        right_foc_uNm = right_uNm;
     }
 }
 
@@ -272,6 +282,12 @@ BaseType_t xTaskCreatePinnedToCore(
  */
 void vTaskDelayUntil(TickType_t *, TickType_t)
 {
+    const control::status current = control::get_status();
+    assert(left_foc_uNm == settings.left_wheel_direction *
+        static_cast<int32_t>(roundf(current.left_torque_Nm * 1.0e6f)));
+    assert(right_foc_uNm == settings.right_wheel_direction *
+        static_cast<int32_t>(roundf(current.right_torque_Nm * 1.0e6f)));
+
     tick_ms++;
     clock_us += tick_ms <= 100 ? 2000 : 1000;
     if(tick_ms == 20){assert(control::get_status().upright_ms >= 30);}
@@ -359,6 +375,11 @@ void vTaskDelayUntil(TickType_t *, TickType_t)
     }
     if(tick_ms == 3640){input.buttons = 0;}
     if(tick_ms == 4100){assert(enabled);}
+    if(tick_ms == 4001)
+    {
+        assert(fabsf(current.measured.speed_m_s - settings.balance.wheel_radius_m * 1.5f) < 1e-7f);
+        assert(current.left_torque_Nm != 0 && current.right_torque_Nm != 0);
+    }
     if(tick_ms == 4110)
     {
         clock_us += 7000;
@@ -399,14 +420,29 @@ void vTaskDelayUntil(TickType_t *, TickType_t)
 int32_t main()
 {
     assert(!control::begin_configuration()); // 启动校准期间不能重启保存。
-    assert(control::init());
-    try
+    const int8_t directions[] = {-1, 1};
+    for(int8_t left : directions)
     {
-        control_task(nullptr);
+        for(int8_t right : directions)
+        {
+            settings.left_wheel_direction = left;
+            settings.right_wheel_direction = right;
+            clock_us = 1000000;
+            tick_ms = 0;
+            pose_updates = 0;
+            pose_before_trip = 0;
+            input = {};
+
+            assert(control::init());
+            try
+            {
+                control_task(nullptr);
+            }
+            catch(const finished &)
+            {
+            }
+            assert(!enabled);
+        }
     }
-    catch(const finished &)
-    {
-    }
-    assert(!enabled);
-    puts("safety tests passed: elapsed time, stale IMU, rearm, config lock, input loss, pitch, deadline, torque guard");
+    puts("safety tests passed: wheel directions, elapsed time, stale IMU, rearm, config lock, input loss, pitch, deadline, torque guard");
 }

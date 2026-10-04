@@ -100,6 +100,7 @@ int32_t main()
     assert(config::from_json(json, copy));
     cJSON_Delete(json);
     assert(copy.balance.gain_poly[0][0][3] == original.balance.gain_poly[0][0][3]);
+    assert(copy.left_wheel_direction == -1 && copy.right_wheel_direction == -1);
 
     std::ifstream input("docs/gain_poly_candidate.json");
     const std::string candidate{
@@ -124,10 +125,12 @@ int32_t main()
     json = cJSON_Parse(
         "{\"network\":{\"wifi_ssid\":\"robot\",\"wifi_password\":\"secret\","
         "\"gamepad_address\":\"aa:bb:cc:dd:ee:ff\"},"
-        "\"balance\":{\"pitch_offset_rad\":0.01}}");
+        "\"balance\":{\"pitch_offset_rad\":0.01},"
+        "\"motor\":{\"left_wheel_direction\":1,\"right_wheel_direction\":-1}}");
     assert(config::from_json(json, copy));
     cJSON_Delete(json);
     assert(strcmp(copy.wifi_ssid, "robot") == 0 && copy.balance.pitch_offset_rad == 0.01f);
+    assert(copy.left_wheel_direction == 1 && copy.right_wheel_direction == -1);
 
     const float previous = copy.balance.pitch_offset_rad;
     const char *invalid_configs[] =
@@ -136,13 +139,20 @@ int32_t main()
         "{\"motor\":{\"kt_Nm_A\":0}}",
         "{\"leg\":{\"height_feedback\":1}}",
         "{\"network\":{\"gamepad_address\":\"no-address\"}}",
-        "{\"balance\":{\"height_min_m\":0.09,\"height_max_m\":0.04}}"
+        "{\"balance\":{\"height_min_m\":0.09,\"height_max_m\":0.04}}",
+        "{\"motor\":{\"left_wheel_direction\":0}}",
+        "{\"motor\":{\"right_wheel_direction\":0.5}}",
+        "{\"motor\":{\"left_wheel_direction\":1.5}}",
+        "{\"motor\":{\"right_wheel_direction\":2}}",
+        "{\"motor\":{\"left_wheel_direction\":true}}",
+        "{\"motor\":{\"left_wheel_direction\":-1,\"right_wheel_direction\":0}}"
     };
     for(const char *bad : invalid_configs)
     {
         json = cJSON_Parse(bad);
         assert(!config::from_json(json, copy));
         assert(copy.balance.pitch_offset_rad == previous);
+        assert(copy.left_wheel_direction == 1 && copy.right_wheel_direction == -1);
         cJSON_Delete(json);
     }
 
@@ -170,5 +180,6 @@ int32_t main()
     assert(config::init());
     assert(strcmp(config::get().wifi_ssid, "robot") == 0);
     assert(config::get().balance.pitch_offset_rad == 0.01f);
+    assert(config::get().left_wheel_direction == 1 && config::get().right_wheel_direction == -1);
     puts("config tests passed: candidate import, atomic validation, persistence boundary");
 }

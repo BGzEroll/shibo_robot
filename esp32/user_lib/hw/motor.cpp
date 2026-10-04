@@ -520,7 +520,7 @@ namespace motor
     }
 
     /**
-     * @brief 提交平衡控制已限幅的左右电机力矩目标与使能状态
+     * @brief 提交已限幅并转换到 FOC 坐标的左右电机力矩目标与使能状态
      *
      * @param[in] left_uNm 左电机目标力矩，单位 μN·m
      * @param[in] right_uNm 右电机目标力矩，单位 μN·m

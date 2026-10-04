@@ -146,6 +146,10 @@ namespace config
                 field_name(name), number) != nullptr;
         });
 
+        cJSON *motor = cJSON_GetObjectItemCaseSensitive(json, "motor");
+        cJSON_AddNumberToObject(motor, "left_wheel_direction", value.left_wheel_direction);
+        cJSON_AddNumberToObject(motor, "right_wheel_direction", value.right_wheel_direction);
+
         cJSON *balance = cJSON_GetObjectItemCaseSensitive(json, "balance");
         cJSON *poly = cJSON_AddArrayToObject(balance, "gain_poly");
         for(const auto &side : value.balance.gain_poly)
@@ -207,6 +211,17 @@ namespace config
             number = static_cast<float>(item->valuedouble);
             return true;
         })){return false;}
+
+        const cJSON *motor = cJSON_GetObjectItemCaseSensitive(json, "motor");
+        const cJSON *left = cJSON_GetObjectItemCaseSensitive(motor, "left_wheel_direction");
+        const cJSON *right = cJSON_GetObjectItemCaseSensitive(motor, "right_wheel_direction");
+        for(const cJSON *direction : {left, right})
+        {
+            if(direction != nullptr && (!cJSON_IsNumber(direction) ||
+               (direction->valuedouble != 1 && direction->valuedouble != -1))){return false;}
+        }
+        if(left != nullptr){next.left_wheel_direction = static_cast<int8_t>(left->valuedouble);}
+        if(right != nullptr){next.right_wheel_direction = static_cast<int8_t>(right->valuedouble);}
 
         const cJSON *poly = cJSON_GetObjectItemCaseSensitive(
             cJSON_GetObjectItemCaseSensitive(json, "balance"), "gain_poly");

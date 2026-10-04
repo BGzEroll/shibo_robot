@@ -1,10 +1,10 @@
-"""独立复算 MATLAB 候选模型、float32 调度闭环和旧系数的对应关系。
+"""独立复算前进力矩坐标下的 MATLAB 候选模型和 float32 调度闭环。
 运行：python tests/check_lqr.py（需要 numpy / scipy）。
 """
 import json
 from pathlib import Path
 import numpy as np
-from scipy.linalg import expm, solve_discrete_are, solve_continuous_are
+from scipy.linalg import expm, solve_discrete_are
 
 ROOT = Path(__file__).resolve().parents[1]
 M, m, r, D, Iw, Iyaw, g = 0.4011 - 2 * 0.0594, 0.0594, 0.0263, 0.0571, 4.746798875e-6, 2.924e-4, 9.81
@@ -28,10 +28,10 @@ def model(L):
     A[1,0] = L*M*g*(2*Iw + M*r*r + 2*r*r*m)/den
     A[2,0] = -L*L*M*M*r*r*g/den
     A[4,2], A[5,3] = -1, -1
-    B[1,:] = (2*Iw + M*r*r + 2*r*r*m + L*M*r)/den
-    B[2,:] = -r*(M*L*L + M*r*L + J)/den
+    B[1,:] = -(2*Iw + M*r*r + 2*r*r*m + L*M*r)/den
+    B[2,:] = r*(M*L*L + M*r*L + J)/den
     c = D*r/(m*D*D*r*r + Iw*D*D + 2*Iyaw*r*r)
-    B[3,:] = [c, -c]
+    B[3,:] = [-c, c]
     zoh = expm(np.block([[A, B], [np.zeros((2,8))]]) * .001)
     return zoh[:6,:6], zoh[:6,6:]
 

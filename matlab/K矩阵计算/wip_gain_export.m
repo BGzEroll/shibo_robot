@@ -1,8 +1,8 @@
 function result = wip_gain_export(output_file)
 % 为 esp32/test 的实际反馈状态生成离散 LQR 高度调度参数。
 % 需要 Control System Toolbox。输出可直接导入参数网页。
-% 正 FOC 力矩对应负轮前进速度；左正/右负力矩对应正 IMU 偏航。
-% 上述符号必须在悬空低力矩测试中确认，不能靠调 Q/R 修正接线/坐标错误。
+% 左右轮输入力矩均以前进为正；右正/左负力矩对应正 IMU 偏航。
+% 固件通过左右轮方向配置转换到 FOC 坐标，IMU 坐标仍需实机确认。
 if nargin == 0
     output_file = fullfile(fileparts(mfilename('fullpath')), 'gain_poly_candidate.json');
 end
@@ -48,11 +48,11 @@ for i = 1:numel(L_vec)
     A(5,3) = -1;
     A(6,4) = -1;
     B = zeros(6,2);
-    % 物理前进轮力矩 = -FOC 力矩，故纵向 B 的两列取反。
-    B(2,:) = (2*Iw + M*r^2 + 2*r^2*m + L*M*r) / den;
-    B(3,:) = -r*(M*L^2 + M*r*L + Jc) / den;
+    % 输入为前进轮力矩，俯仰直接采用固件 IMU Y 轴。
+    B(2,:) = -(2*Iw + M*r^2 + 2*r^2*m + L*M*r) / den;
+    B(3,:) = r*(M*L^2 + M*r*L + Jc) / den;
     yaw_gain = D*r / (m*D^2*r^2 + Iw*D^2 + 2*Iyaw*r^2);
-    B(4,:) = [yaw_gain, -yaw_gain];
+    B(4,:) = [-yaw_gain, yaw_gain];
     discrete = c2d(ss(A,B,eye(6),zeros(6,2)), Ts, 'zoh');
     K = dlqr(discrete.A,discrete.B,Q,Ru);
     G(:,:,i) = -K; % 固件直接执行 torque = gain * feedback。

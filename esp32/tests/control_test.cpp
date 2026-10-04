@@ -249,7 +249,9 @@ int32_t main()
     input.pressed = buttons::LB;
     step();
     assert(actions.current_mode == mode::SIT);
-    assert(step().mode == balance_mode::DIRECT && leg_mode == 2);
+    const auto seated = step();
+    assert(seated.mode == balance_mode::DIRECT && leg_mode == 2);
+    assert(seated.direct_left == 0.005f && seated.direct_right == 0.005f);
     measured.pitch_rad = 0.3f;
     assert(step().mode == balance_mode::OFF && actions.phase == 2);
     measured.pitch_rad = 0;
@@ -323,10 +325,10 @@ int32_t main()
     const auto low = balance::step(0.031f, 0.01f, 0, 0, 0, 0.001f, command);
     balance::reset();
     const auto high = balance::step(0.082f, 0.01f, 0, 0, 0, 0.001f, command);
-    assert(low.left_Nm == low.right_Nm && low.left_Nm < 0 && low.left_Nm != high.left_Nm);
+    assert(low.left_Nm == low.right_Nm && low.left_Nm > 0 && low.left_Nm != high.left_Nm);
     balance::reset();
     const auto turn = balance::step(0.048f, 0, 0, 0, 0.1f, 0.001f, command);
-    assert(turn.left_Nm < 0 && turn.right_Nm > 0 && fabsf(turn.left_Nm + turn.right_Nm) < 1e-7f);
+    assert(turn.left_Nm > 0 && turn.right_Nm < 0 && fabsf(turn.left_Nm + turn.right_Nm) < 1e-7f);
     const auto saturated = balance::step(0.048f, 1, 10, 10, 10, 0.001f, command);
     assert(fabsf(saturated.left_Nm) <= 0.025f && fabsf(saturated.right_Nm) <= 0.025f);
 

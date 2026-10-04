@@ -172,8 +172,8 @@ namespace control::action
             if(value.phase == DAMP)
             {
                 command.mode = balance_mode::DIRECT;
-                command.direct_left = -0.005f;
-                command.direct_right = -0.005f;
+                command.direct_left = 0.005f;
+                command.direct_right = 0.005f;
                 if(fabsf(measured.pitch_rad) >= 0.25f || value.timer_ms >= 1000)
                 {
                     value.phase = SEATED;

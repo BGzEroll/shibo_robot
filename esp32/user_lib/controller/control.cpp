@@ -80,7 +80,8 @@ namespace control
                 measured.yaw_angle = snapshot.imu.angle[2];
                 measured.yaw_rate = snapshot.imu.gyro[2];
                 measured.roll_angle = snapshot.imu.angle[0];
-                measured.speed_m_s = -(directions.left * snapshot.left_encoder.speed_mrad_s +
+                measured.speed_m_s = (settings.left_wheel_direction * directions.left *
+                    snapshot.left_encoder.speed_mrad_s + settings.right_wheel_direction *
                     directions.right * snapshot.right_encoder.speed_mrad_s) * 0.0005f *
                     settings.balance.wheel_radius_m;
                 measured.avg_leg_height = legs.height_m;
@@ -184,7 +185,8 @@ namespace control
 
                 portENTER_CRITICAL(&lock);
                 if(maintenance){next.enabled = false;}
-                motor::set_target(static_cast<int32_t>(roundf(torque.left_Nm * 1.0e6f)),
+                motor::set_target(settings.left_wheel_direction *
+                    static_cast<int32_t>(roundf(torque.left_Nm * 1.0e6f)), settings.right_wheel_direction *
                     static_cast<int32_t>(roundf(torque.right_Nm * 1.0e6f)), next.enabled);
                 latest = next;
                 portEXIT_CRITICAL(&lock);

@@ -12,6 +12,10 @@ namespace config
         balance::config balance;
         motor::config motor;
 
+        // FOC 正方向到小车前进方向的转换符号，仅取 1 或 -1。
+        int8_t left_wheel_direction = -1;
+        int8_t right_wheel_direction = -1;
+
         float max_linear_m_s = 0.6f;
         float max_yaw_rad_s = 2.0f;
 
