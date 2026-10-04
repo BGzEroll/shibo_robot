@@ -4,7 +4,7 @@
 #include "controller/control.h"
 #include "hw/battery.h"
 #include "hw/gamepad.h"
-#include "io/host.h"
+#include "controller/input.h"
 #include "esp_http_server.h"
 #include "esp_wifi.h"
 #include "esp_netif.h"
@@ -263,6 +263,8 @@ namespace web
         if(esp_timer_create(&restart, &restart_timer) != ESP_OK){return false;}
 
         httpd_config_t http = HTTPD_DEFAULT_CONFIG();
+        http.core_id = 0;
+        http.task_priority = 4;
         http.stack_size = 6144;
         if(httpd_start(&server, &http) != ESP_OK){return false;}
 

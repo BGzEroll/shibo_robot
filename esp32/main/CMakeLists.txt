@@ -7,7 +7,7 @@ idf_component_register(SRCS "main.c" "../user_lib/app.cpp" "../user_lib/config.c
                              "../user_lib/controller/control.cpp" "../user_lib/controller/leg.cpp"
                              "../user_lib/controller/balance.cpp"
                              "../user_lib/controller/action.cpp" "../user_lib/controller/input.cpp"
-                             "../user_lib/io/host.cpp" "../user_lib/io/web.cpp"
+                             "../user_lib/io/web.cpp"
                              "../user_lib/test.cpp"
                     INCLUDE_DIRS "." "../user_lib"
                     REQUIRES esp_adc esp_driver_gpio esp_driver_i2c esp_driver_uart

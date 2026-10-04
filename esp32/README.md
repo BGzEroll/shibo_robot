@@ -31,7 +31,7 @@ Xbox 优先于上位机。Xbox 连接成功时提供一次振动反馈。连接�
 
 网页可编辑 `gain_poly`、轮半径、质心高度、俯仰零偏、速度参考滤波、积分限幅、电机 R/Kt/Ke/母线电压/力矩限幅、最大速度、横滚 PID、电池阈值，以及腿长/质心高度映射。手柄处于配对模式时会自动扫描 Xbox，网页显示 MAC；地址留空时自动选择扫描到的 Xbox，也可填写固定 MAC 后保存。
 
-网页状态请求完成后等待 1 秒再刷新，约 1 Hz。HTTP 服务按请求处理，没有固定周期；当前使用 IDF 默认优先级 5，未绑定核心，可在 core 0 或 core 1 运行，任务栈为 6144 字节。
+网页状态请求完成后等待 1 秒再刷新，约 1 Hz。HTTP 服务按请求处理，没有固定周期；当前绑定 core 0，优先级 4，任务栈为 6144 字节。
 
 参数以 JSON 存在 NVS。先用 Start 停止，再点击“保存并重启”；一组配置在重启后统一生效，重启后仍需 RB 起身。支持导入完整配置或 MATLAB 的局部增益配置，导入本身只修改表单。JSON 导出含 Wi-Fi 密码。
 
@@ -57,7 +57,7 @@ Xbox 优先于上位机。Xbox 连接成功时提供一次振动反馈。连接�
 | 状态灯 | GPIO13；GPIO21 两颗 WS2812，RMT |
 | 上位机/视觉 | UART0，TX1/RX3，115200 baud；也用于启动日志/固定监视屏 |
 
-`motor` 在 core 1 由 PWM 通知执行 FOC；`control` 在 core 0 每 1 ms 平衡、每 10 ms 更新输入和动作。腿总线有独立任务，每 10 ms 写变化的目标、每 20 ms 读反馈，控制任务和监视屏读取快照。电池/灯效、UART0、BLE 扫描各有低优先级任务。腿部逻辑位于 `controller/leg.cpp`，底层串口驱动位于 `hw/leg_servo.cpp`；手柄报告解析合并在 `hw/gamepad.cpp`。网页使用 IDF HTTP Server，参数使用 NVS，BLE 使用原生 NimBLE/HID Host。
+`motor` 在 core 1 由 PWM 通知执行 FOC；`control` 在 core 0 每 1 ms 平衡、每 10 ms 更新输入和动作。腿总线有独立任务，每 10 ms 写变化的目标、每 20 ms 读反馈，控制任务和监视屏读取快照。电池/灯效、UART0、BLE 扫描各有低优先级任务。腿部逻辑位于 `controller/leg.cpp`，底层串口驱动位于 `hw/leg_servo.cpp`；手柄报告解析合并在 `hw/gamepad.cpp`；UART0 上位机接收与输入路由放在 `controller/input.cpp/.h` 中，分别由 `host` 和 `input_router` 命名空间实现。网页使用 IDF HTTP Server，参数使用 NVS，BLE 使用原生 NimBLE/HID Host。
 
 编码器 5 ms、IMU 15 ms、腿反馈 100 ms、遥控输入 250 ms 为有效期；电机命令超过 20 ms 也由 FOC 层关闭输出。腿高度调度默认关闭，使用固定 0.048 m；完成质心高度映射核对后可在网页开启。详细模型假设和力矩换算见 [LQR 调参说明](docs/lqr_tuning.md)。
 

@@ -9,7 +9,6 @@
 #include "leg.h"
 #include "hw/battery.h"
 #include "hw/aux_servo.h"
-#include "io/host.h"
 #include "sys_time.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"

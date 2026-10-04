@@ -3,9 +3,9 @@ set -eu
 cd "$(dirname "$0")/.."
 shibo_test_dir=$(mktemp -d)
 trap 'rm -rf "$shibo_test_dir"' EXIT
-shibo_sources="user_lib/controller/action.cpp user_lib/controller/balance.cpp user_lib/controller/input.cpp"
+shibo_sources="user_lib/controller/action.cpp user_lib/controller/balance.cpp"
 shibo_includes="-Iuser_lib -Imanaged_components/espressif__cjson/cJSON -Itests/stubs"
-# 直接提取生产代码中的解析函数，主机测试无需编译 BLE 硬件部分。
+# 提取生产代码中的报告解析和输入路由，主机测试无需编译 BLE、UART 硬件部分。
 python3 - "$shibo_test_dir/report.cpp" <<'PYTHON'
 from pathlib import Path
 import sys
@@ -20,12 +20,21 @@ for end in range(body, len(source)):
         break
 Path(sys.argv[1]).write_text(
     '#include "hw/gamepad.h"\n\nnamespace gamepad\n{\n' + source[start:end + 1] + '\n}\n')
+
+source = Path("user_lib/controller/input.cpp").read_text()
+headers = source[:source.index("namespace host")]
+headers = headers.replace('#include "input.h"', '#include "controller/input.h"')
+headers = headers.replace('#include "action.h"', '#include "controller/action.h"')
+headers = '\n'.join(line for line in headers.splitlines()
+    if not line.startswith(('#include "driver/', '#include "freertos/')))
+Path(sys.argv[1]).with_name("input.cpp").write_text(
+    headers + '\n\n' + source[source.index("namespace control::input_router"):])
 PYTHON
 g++ -std=c++17 -Wall -Wextra -Werror $shibo_includes tests/control_test.cpp \
-    $shibo_sources "$shibo_test_dir/report.cpp" -o "$shibo_test_dir/control_test"
+    $shibo_sources "$shibo_test_dir/input.cpp" "$shibo_test_dir/report.cpp" -o "$shibo_test_dir/control_test"
 "$shibo_test_dir/control_test"
 g++ -std=c++17 -Wall -Wextra -Werror $shibo_includes tests/safety_test.cpp \
-    $shibo_sources user_lib/controller/control.cpp -o "$shibo_test_dir/safety_test"
+    $shibo_sources "$shibo_test_dir/input.cpp" user_lib/controller/control.cpp -o "$shibo_test_dir/safety_test"
 "$shibo_test_dir/safety_test"
 gcc -std=c11 -Imanaged_components/espressif__cjson/cJSON -c \
     managed_components/espressif__cjson/cJSON/cJSON.c -o "$shibo_test_dir/cjson.o"

@@ -6,7 +6,7 @@
 #include "hw/battery.h"
 #include "hw/gamepad.h"
 #include "controller/control.h"
-#include "io/host.h"
+#include "controller/input.h"
 #include "io/web.h"
 #include "esp_log.h"
 #include "test.h"

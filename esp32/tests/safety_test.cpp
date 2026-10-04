@@ -6,7 +6,7 @@
 #include "hw/aux_servo.h"
 #include "hw/battery.h"
 #include "hw/gamepad.h"
-#include "io/host.h"
+#include "controller/input.h"
 #include "freertos/task.h"
 #include <cassert>
 #include <cstdio>

@@ -5,7 +5,6 @@
 #include "hw/gamepad.h"
 #include "controller/leg.h"
 #include "hw/aux_servo.h"
-#include "io/host.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
