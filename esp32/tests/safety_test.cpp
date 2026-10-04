@@ -22,6 +22,8 @@ namespace
     uint32_t tick_ms = 0;
     void (*control_task)(void *) = nullptr;
     bool enabled = false;
+    uint32_t pose_updates = 0;
+    uint32_t pose_before_trip = 0;
     control::remote_input input;
 }
 
@@ -64,6 +66,7 @@ namespace sensor
     {
         out = {};
         out.imu.timestamp_us = clock_us;
+        if(tick_ms >= 3500 && tick_ms < 3510){out.imu.angle[1] = 0.6f;}
         if(tick_ms >= 740 && tick_ms < 760){out.imu.timestamp_us -= 15001;}
         out.left_encoder.timestamp_us = clock_us;
         out.right_encoder.timestamp_us = clock_us;
@@ -118,6 +121,22 @@ namespace leg
      */
     void set_pose(int16_t, int16_t, uint16_t, uint8_t)
     {
+        pose_updates++;
+    }
+
+    /**
+     * @brief 替代测试中的腿部 PID 状态复位
+     */
+    void reset()
+    {
+    }
+
+    /**
+     * @brief 记录动作是否提交了腿部更新
+     */
+    void update(float, uint16_t, bool, uint32_t, float)
+    {
+        pose_updates++;
     }
 
     /**
@@ -179,7 +198,7 @@ namespace gamepad
      */
     bool get(control::remote_input &out)
     {
-        input.valid = tick_ms < 2600;
+        input.valid = tick_ms < 2600 || tick_ms >= 2920;
         input.stream_id = 1;
         input.timestamp_us = static_cast<uint32_t>(clock_us);
         out = input;
@@ -230,12 +249,15 @@ TickType_t xTaskGetTickCount()
  * @brief 记录控制任务入口供测试直接执行
  *
  * @param[in] task 控制任务入口
+ * @param[in] priority 任务优先级
+ * @param[in] core 任务核心
  *
  * @return pdPASS
  */
 BaseType_t xTaskCreatePinnedToCore(
-    void (*task)(void *), const char *, uint32_t, void *, int32_t, TaskHandle_t *, int32_t)
+    void (*task)(void *), const char *, uint32_t, void *, int32_t priority, TaskHandle_t *, int32_t core)
 {
+    assert(priority == 4 && core == 0);
     control_task = task;
     return pdPASS;
 }
@@ -246,7 +268,9 @@ BaseType_t xTaskCreatePinnedToCore(
 void vTaskDelayUntil(TickType_t *, TickType_t)
 {
     tick_ms++;
-    clock_us += 1000;
+    clock_us += tick_ms <= 100 ? 2000 : 1000;
+    if(tick_ms == 20){assert(control::get_status().upright_ms >= 30);}
+    if(tick_ms == 80){assert(control::get_status().upright_ms == 100);}
     if(tick_ms == 140)
     {
         assert(!enabled);
@@ -294,7 +318,53 @@ void vTaskDelayUntil(TickType_t *, TickType_t)
     if(tick_ms == 2500){assert(enabled);}
     // 只更新控制任务的时钟，模拟手柄长时间无新报告。
     if(tick_ms >= 2600){input.valid = false;}
-    if(tick_ms == 2900)
+    if(tick_ms == 2900){assert(!enabled);}
+    if(tick_ms == 2930)
+    {
+        input.press_count[9]++;
+        input.buttons = control::buttons::RB;
+    }
+    if(tick_ms == 2940){input.buttons = 0;}
+    if(tick_ms == 3500)
+    {
+        assert(enabled);
+        pose_before_trip = pose_updates;
+        input.press_count[3]++;
+        input.buttons = control::buttons::Y;
+    }
+    if(tick_ms == 3501)
+    {
+        assert(!enabled && pose_updates == pose_before_trip);
+        const control::status state = control::get_status();
+        assert(state.state == control::arm_state::tripped_pitch);
+        assert(state.mode == control::mode::STOP && state.phase == 0);
+    }
+    if(tick_ms == 3510){input.buttons = 0;}
+    if(tick_ms == 3540)
+    {
+        input.press_count[9]++;
+        input.buttons = control::buttons::RB;
+    }
+    if(tick_ms == 3550){input.buttons = 0;}
+    if(tick_ms == 3560){assert(!enabled && control::get_status().mode == control::mode::STOP);}
+    if(tick_ms == 3630)
+    {
+        input.press_count[9]++;
+        input.buttons = control::buttons::RB;
+    }
+    if(tick_ms == 3640){input.buttons = 0;}
+    if(tick_ms == 4100){assert(enabled);}
+    if(tick_ms == 4110)
+    {
+        clock_us += 7000;
+        pose_before_trip = pose_updates;
+    }
+    if(tick_ms == 4111)
+    {
+        assert(!enabled && pose_updates == pose_before_trip);
+        assert(control::get_status().state == control::arm_state::tripped_sensor);
+    }
+    if(tick_ms == 4200)
     {
         assert(!enabled);
         throw finished{};
@@ -318,5 +388,5 @@ int32_t main()
     {
     }
     assert(!enabled);
-    puts("safety tests passed: stale IMU, explicit rearm, Start, config lock, input loss");
+    puts("safety tests passed: elapsed time, stale IMU, rearm, config lock, input loss, pitch, deadline");
 }

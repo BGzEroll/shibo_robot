@@ -82,7 +82,6 @@ namespace balance
         }
 
         if(command.reset_reference){reset();}
-        if(command.reset_yaw_integral){yaw_integral_rad = 0.0f;}
 
         if(command.mode == control::balance_mode::DIRECT)
         {
@@ -107,14 +106,14 @@ namespace balance
         const bool recovering = command.mode == control::balance_mode::RECOVER;
         const float linear_error = command.linear_feedback && !recovering ?
             linear_speed_m_s - linear_reference : 0.0f;
-        const float yaw_error = command.steering && command.yaw_feedback && !recovering ?
+        const float yaw_error = command.yaw_feedback && !recovering ?
             yaw_rate_rad_s - yaw_reference : 0.0f;
 
         const float old_linear = linear_integral_m;
         const float old_yaw = yaw_integral_rad;
         linear_integral_m = std::clamp(linear_integral_m - linear_error * dt_s,
             -settings.linear_integral_limit_m, settings.linear_integral_limit_m);
-        yaw_integral_rad = command.yaw_integral ? std::clamp(yaw_integral_rad - yaw_error * dt_s,
+        yaw_integral_rad = command.yaw_feedback ? std::clamp(yaw_integral_rad - yaw_error * dt_s,
             -settings.yaw_integral_limit_rad, settings.yaw_integral_limit_rad) : 0.0f;
         if(recovering)
         {
@@ -127,7 +126,7 @@ namespace balance
             pitch_rad - settings.pitch_offset_rad, pitch_rate_rad_s,
             linear_error, yaw_error,
             command.linear_feedback ? linear_integral_m : 0.0f,
-            command.steering && command.yaw_feedback ? yaw_integral_rad : 0.0f
+            command.yaw_feedback ? yaw_integral_rad : 0.0f
         };
 
         float torque[2] = {};

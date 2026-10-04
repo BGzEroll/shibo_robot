@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 
 namespace
 {
@@ -63,6 +64,20 @@ namespace leg
     {
         left_pose = left;
         right_pose = right;
+    }
+
+    /**
+     * @brief 替代动作测试中的腿部 PID 状态复位
+     */
+    void reset()
+    {
+    }
+
+    /**
+     * @brief 替代动作测试中的连续腿部姿态更新
+     */
+    void update(float, uint16_t, bool, uint32_t, float)
+    {
     }
 
     /**
@@ -150,106 +165,161 @@ namespace host
 int32_t main()
 {
     using namespace control;
-    action::state actions;
-    action::leg_runtime legs;
-    status sensor;
+    feedback measured;
     control_input input;
     input.fresh = true;
-    action::context ctx{input, sensor, legs, 0.6f, 2.0f, true, false, 2088, 2008, false, 0, 0, 0};
-    action::init(actions);
-    assert(action::step(actions, ctx, 10).mode == balance_mode::OFF);
-    input.action = action_request::BOOT;
-    assert(action::step(actions, ctx, 10).mode == balance_mode::OFF);
-    assert(leg_mode == 1 && actions.current_mode == action::mode::BOOT);
-    input.action = action_request::NONE;
-    for(uint32_t i = 0; i < 60; i++)
+    leg::package legs;
+    legs.left.position_rad = 2088 * (6.28318530718f / 4096);
+    legs.right.position_rad = 2008 * (6.28318530718f / 4096);
+    host::vision_measurement vision;
+    bool battery_low = false;
+    action::output actions;
+    action::init();
+
+    const auto step = [&]()
     {
         clock_us += 10000;
-        action::step(actions, ctx, 10);
-    }
-    assert(actions.current_mode == action::mode::BALANCE);
-
-    input.action = action_request::STOP;
-    assert(action::step(actions, ctx, 10).mode == balance_mode::OFF && leg_mode == 0);
-    input.action = action_request::NONE;
-    for(uint32_t i = 0; i < 300; i++)
+        actions = action::step(input, measured, legs, vision, battery_low, 10);
+        input.pressed = 0;
+        return actions.command;
+    };
+    const auto advance = [&](uint32_t count)
     {
-        action::step(actions, ctx, 10);
-    }
-    assert(actions.current_mode == action::mode::STOP);
+        for(uint32_t i = 0; i < count; i++){step();}
+    };
+    const auto start = [&]()
+    {
+        input.pressed = buttons::RB;
+        assert(step().mode == balance_mode::OFF);
+        assert(actions.current_mode == mode::BOOT && leg_mode == 1);
+        advance(60);
+        assert(actions.current_mode == mode::BALANCE);
+    };
+
+    assert(step().mode == balance_mode::OFF);
+    start();
+    input.pressed = buttons::START;
+    assert(step().mode == balance_mode::OFF && leg_mode == 0);
+    assert(actions.current_mode == mode::STOP && actions.phase == 0 && frontier == 180);
+    advance(300);
+    assert(actions.current_mode == mode::STOP);
 
     // 起身未稳定时等待超时必须停止。
-    input.action = action_request::BOOT;
-    action::step(actions, ctx, 10);
-    input.action = action_request::NONE;
-    sensor.pitch_rad = 0.3f;
-    for(uint32_t i = 0; i < 300; i++)
-    {
-        action::step(actions, ctx, 10);
-    }
-    assert(actions.current_mode == action::mode::STOP && leg_mode == 0);
-    sensor.pitch_rad = 0;
+    input.pressed = buttons::RB;
+    step();
+    measured.pitch_rad = 0.3f;
+    advance(300);
+    assert(actions.current_mode == mode::STOP && leg_mode == 0);
+    measured.pitch_rad = 0;
+    start();
 
-    actions.current_mode = action::mode::BALANCE;
-    input.action = action_request::JUMP_FORWARD;
-    action::step(actions, ctx, 10);
-    assert(left_pose == 2148 && right_pose == 1948);
-    input.action = action_request::NONE;
-    for(uint32_t i = 0; i < 65; i++)
+    // 五种跳跃共用阶段流程，完成后回到平衡。
+    const uint16_t jump_buttons[] = {buttons::Y, buttons::A, buttons::X, buttons::B, buttons::RS};
+    const uint32_t push_ticks[] = {65, 70, 20, 20, 20};
+    for(uint32_t i = 0; i < 5; i++)
     {
-        action::step(actions, ctx, 10);
+        input.pressed = jump_buttons[i];
+        assert(step().reset_reference && actions.current_mode == mode::JUMP);
+        assert(left_pose == 2148 && right_pose == 1948);
+        advance(push_ticks[i]);
+        assert(left_pose == 2518 && right_pose == 1578 && actions.phase == 1);
+        advance(13);
+        assert(left_pose == 2148 && actions.phase == 2);
+        advance(61);
+        assert(actions.current_mode == mode::BALANCE);
     }
-    assert(left_pose == 2518 && right_pose == 1578 && actions.phase == 1);
-    for(uint32_t i = 0; i < 13; i++)
-    {
-        action::step(actions, ctx, 10);
-    }
-    assert(left_pose == 2148 && actions.phase == 2);
-    for(uint32_t i = 0; i < 61; i++)
-    {
-        action::step(actions, ctx, 10);
-    }
-    assert(actions.current_mode == action::mode::BALANCE);
 
-    // 低电坐下后不响应起身，校准必须通过显式动作触发。
-    actions.current_mode = action::mode::SIT;
-    actions.phase = 2;
-    ctx.battery_low = true;
-    input.action = action_request::EXIT;
-    assert(action::step(actions, ctx, 10).mode == balance_mode::OFF);
-    assert(actions.current_mode == action::mode::SIT);
-    ctx.battery_low = false;
-    input.action = action_request::MIDDLE_CALIBRATION;
-    action::step(actions, ctx, 10);
-    input.action = action_request::NONE;
-    for(uint32_t i = 0; i < 200; i++)
-    {
-        action::step(actions, ctx, 10);
-    }
+    // 跳跃伸展中停止，阶段和计时不能残留到下一次启动。
+    input.pressed = buttons::Y;
+    step();
+    advance(65);
+    input.pressed = buttons::START;
+    assert(step().mode == balance_mode::OFF);
+    assert(actions.current_mode == mode::STOP && actions.phase == 0 && leg_mode == 0);
+    start();
+
+    // 同时按下多个动作键时保留原有按键优先级。
+    input.pressed = buttons::B | buttons::LB;
+    step();
+    assert(actions.current_mode == mode::JUMP && step().yaw_rate < 0);
+    input.pressed = buttons::START;
+    step();
+    start();
+
+    input.pressed = buttons::LB;
+    step();
+    assert(actions.current_mode == mode::SIT);
+    assert(step().mode == balance_mode::DIRECT && leg_mode == 2);
+    measured.pitch_rad = 0.3f;
+    assert(step().mode == balance_mode::OFF && actions.phase == 2);
+    measured.pitch_rad = 0;
+
+    // 低电坐下后不响应起身，校准必须通过显式按键触发。
+    battery_low = true;
+    input.pressed = buttons::RB;
+    assert(step().mode == balance_mode::OFF && actions.current_mode == mode::SIT);
+    battery_low = false;
+    input.held = buttons::SELECT;
+    input.pressed = buttons::LB | buttons::RB;
+    step();
+    assert(actions.current_mode == mode::MIDDLE_CALIBRATION);
+    input.held = 0;
+    advance(200);
     assert(actions.phase == 3 && leg_mode == 128);
+    start();
 
-    actions.current_mode = action::mode::BALANCE;
-    input.action = action_request::KICK_RUN;
-    action::step(actions, ctx, 10);
-    input.action = action_request::NONE;
-    ctx.vision_valid = true;
-    ctx.vision_dx = 100;
-    ctx.vision_dy = 40;
-    ctx.vision_sequence = 1;
-    auto command = action::step(actions, ctx, 10);
-    assert(command.linear_vel > 0 && command.yaw_rate > 0);
-    const uint32_t updates = camera_updates;
-    action::step(actions, ctx, 10);
-    assert(camera_updates == updates);
-    ctx.vision_valid = false;
-    command = action::step(actions, ctx, 10);
-    assert(command.linear_vel == 0 && command.yaw_rate == 0 && camera == 45 && frontier == 0);
+    for(uint16_t button : {buttons::X, buttons::Y})
+    {
+        input.held = buttons::SELECT;
+        input.pressed = button | buttons::B;
+        assert(!step().reset_reference);
+        input.held = 0;
+        assert(actions.current_mode == (button == buttons::X ? mode::KICK_PLACE : mode::KICK_RUN));
+        vision.valid = true;
+        vision.dx = 100;
+        vision.dy = 40;
+        vision.sequence++;
+        auto command = step();
+        assert(command.yaw_rate > 0);
+        if(button == buttons::Y){assert(command.linear_vel > 0);}
+        const uint32_t updates = camera_updates;
+        step();
+        assert(camera_updates == updates);
+        vision.valid = false;
+        command = step();
+        assert(command.linear_vel == 0 && command.yaw_rate == 0 && camera == 45 && frontier == 0);
+
+        // 退出视觉后保留最后角度，手动调节从该角度继续。
+        vision.valid = true;
+        vision.sequence++;
+        step();
+        const uint16_t tracked = camera;
+        input.held = buttons::SELECT;
+        input.pressed = buttons::B | buttons::Y;
+        step();
+        assert(actions.current_mode == (button == buttons::X ? mode::KICK_PLACE : mode::KICK_RUN));
+        advance(50);
+        assert(actions.current_mode == mode::BALANCE && camera == tracked);
+        input.held |= buttons::UP;
+        step();
+        assert(camera > tracked && camera <= tracked + 2);
+        input.held = 0;
+    }
+
+    // 低电请求优先坐下，Start 始终执行停止清理。
+    battery_low = true;
+    input.pressed = buttons::Y;
+    step();
+    assert(actions.current_mode == mode::SIT);
+    input.pressed = buttons::START;
+    assert(step().mode == balance_mode::OFF && actions.phase == 0 && frontier == 180);
+    battery_low = false;
 
     // 两轮共模俯仰、差模偏航、实际高度调度和力矩限幅。
     balance::init(settings.balance);
-    command = {};
+    balance_command command;
     command.mode = balance_mode::BALANCE;
-    command.steering = true;
+    command.yaw_feedback = true;
     const auto low = balance::step(0.031f, 0.01f, 0, 0, 0, 0.001f, command);
     balance::reset();
     const auto high = balance::step(0.082f, 0.01f, 0, 0, 0, 0.001f, command);
@@ -263,35 +333,41 @@ int32_t main()
     assert(invalid.left_Nm == 0 && invalid.right_Nm == 0);
 
     uint8_t report[16] = {};
-    for(uint32_t i = 0; i < 4; i++)
-    {
-        report[i * 2 + 1] = 128;
-    }
+    for(uint32_t i = 0; i < 4; i++){report[i * 2 + 1] = 128;}
     report[13] = 0x81; // A + RB
     report[14] = 0x08; // Start
     report[12] = 2;    // Up + Right
     remote_input decoded;
     assert(gamepad::parse_report(report, sizeof(report), decoded));
-    assert(decoded.buttons ==
-        (buttons::A | buttons::RB | buttons::START | buttons::UP | buttons::RIGHT));
+    assert(decoded.buttons == (buttons::A | buttons::RB | buttons::START | buttons::UP | buttons::RIGHT));
     assert(decoded.press_count[0] == 1 && decoded.axes[0] == 0);
     assert(gamepad::parse_report(report, sizeof(report), decoded) && decoded.press_count[0] == 1);
     assert(!gamepad::parse_report(report, 15, decoded));
 
-    // 新连接按住 RB 不启动；释放后再次按下才产生动作。
+    // 新连接按住 RB 不产生边沿；来源切换和重连也不能重放历史按键。
     input_router::init();
     gamepad_connected = true;
     gamepad_input = decoded;
     gamepad_input.timestamp_us = static_cast<uint32_t>(clock_us);
     gamepad_input.stream_id = 1;
-    input_router::update(action::mode::STOP, 0.6f, 2.0f, input);
-    assert(input.fresh && input.action == action_request::NONE);
+    input_router::update(input);
+    assert(input.fresh && input.pressed == 0);
     gamepad_input.press_count[9]++;
-    input_router::update(action::mode::STOP, 0.6f, 2.0f, input);
-    // report 中 Start 也在按住，但未出现新边沿，RB 才是新请求。
-    assert(input.action == action_request::BOOT);
+    input_router::update(input);
+    assert(input.pressed == buttons::RB);
+    gamepad_input.stream_id++;
+    gamepad_input.press_count[5]++;
+    input_router::update(input);
+    assert(input.pressed == 0);
+    gamepad_connected = false;
+    host_input = gamepad_input;
+    input_router::update(input);
+    assert(input.source == input_source::HOST && input.pressed == 0);
+    host_input.press_count[5]++;
+    input_router::update(input);
+    assert(input.pressed == buttons::START);
     clock_us += 250001;
-    input_router::update(action::mode::STOP, 0.6f, 2.0f, input);
-    assert(!input.fresh && input.action == action_request::NONE);
-    puts("control tests passed");
+    input_router::update(input);
+    assert(!input.fresh && input.pressed == 0);
+    puts("control tests passed: actions, camera handoff, interruption, LQR, input edges");
 }

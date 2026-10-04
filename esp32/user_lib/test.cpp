@@ -50,8 +50,8 @@ namespace test
                         " %+5.2f  %" PRIu32 "  %02" PRIX32 "\n"
                         "last_us L=%12" PRIu64 " R=%12" PRIu64 "\033[J",
                         ARM_STATES[static_cast<uint8_t>(control_status.state)],
-                        control_status.pitch_rad,
-                        control_status.speed_m_s,
+                        control_status.measured.pitch_rad,
+                        control_status.measured.speed_m_s,
                         control_status.upright_ms,
                         snapshot.imu.timestamp_us,
                         snapshot.imu.gyro[1],

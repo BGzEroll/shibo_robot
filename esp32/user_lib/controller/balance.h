@@ -25,13 +25,10 @@ namespace control
 
         float recover_blend = 1.0f;
 
-        bool steering = false;
+        bool yaw_feedback = false;
         bool linear_feedback = true;
-        bool yaw_feedback = true;
-        bool yaw_integral = true;
 
         bool reset_reference = false;
-        bool reset_yaw_integral = false;
     };
 }
 

@@ -5,6 +5,18 @@
 
 namespace control
 {
+    enum class mode : uint8_t
+    {
+        BOOT,
+        BALANCE,
+        SIT,
+        JUMP,
+        STOP,
+        KICK_PLACE,
+        KICK_RUN,
+        MIDDLE_CALIBRATION
+    };
+
     enum class arm_state : uint8_t
     {
         preparing,
@@ -20,12 +32,8 @@ namespace control
         low_battery
     };
 
-    struct status
+    struct feedback
     {
-        arm_state state = arm_state::preparing;
-        uint8_t mode = 4;
-        uint8_t phase = 0;
-
         float pitch_rad = 0.0f;
         float pitch_rate = 0.0f;
 
@@ -36,6 +44,15 @@ namespace control
 
         float roll_angle = 0.0f;
         float avg_leg_height = 0.048f;
+    };
+
+    struct status
+    {
+        arm_state state = arm_state::preparing;
+        control::mode mode = control::mode::STOP;
+        uint8_t phase = 0;
+
+        feedback measured;
 
         float left_torque_Nm = 0.0f;
         float right_torque_Nm = 0.0f;

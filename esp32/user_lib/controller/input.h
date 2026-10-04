@@ -5,11 +5,6 @@
 
 namespace control
 {
-    namespace action
-    {
-        enum class mode : uint8_t;
-    }
-
     namespace buttons
     {
         constexpr uint16_t A = 0x0001;
@@ -37,25 +32,6 @@ namespace control
         HOST
     };
 
-    enum class action_request : uint8_t
-    {
-        NONE = 0,
-        STOP,
-        BOOT,
-        RESET_BALANCE,
-        SIT,
-        MIDDLE_CALIBRATION,
-        JUMP_IN_PLACE,
-        JUMP_FORWARD,
-        JUMP_BACKWARD,
-        JUMP_LEFT,
-        JUMP_RIGHT,
-        KICK_PLACE,
-        KICK_RUN,
-        KICK_EXIT,
-        EXIT
-    };
-
     /**
      * @brief 所有遥控来源共享的原始输入快照
      */
@@ -72,7 +48,7 @@ namespace control
     };
 
     /**
-     * @brief 输入路由输出的控制语义
+     * @brief 输入路由输出的速度和按键快照
      */
     struct control_input
     {
@@ -82,22 +58,16 @@ namespace control
         float linear = 0.0f;
         float yaw = 0.0f;
 
-        int8_t camera_direction = 0;
-        int8_t leg_height_direction = 0;
-        int8_t roll_direction = 0;
-
-        action_request action = action_request::NONE;
+        uint16_t held = 0;
+        uint16_t pressed = 0;
 
         bool fresh = false;
-        bool reset_leg = false;
-        bool disable_leg_torque = false;
     };
 
     namespace input_router
     {
         void init();
-        void update(action::mode mode,
-            float max_linear_vel, float max_steer_vel, control_input &out);
+        void update(control_input &out);
     }
 }
 

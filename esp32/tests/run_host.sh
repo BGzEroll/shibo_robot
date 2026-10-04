@@ -36,6 +36,9 @@ g++ -std=c++17 -Wall -Wextra -Werror $shibo_includes tests/control_test.cpp \
 g++ -std=c++17 -Wall -Wextra -Werror $shibo_includes tests/safety_test.cpp \
     $shibo_sources "$shibo_test_dir/input.cpp" user_lib/controller/control.cpp -o "$shibo_test_dir/safety_test"
 "$shibo_test_dir/safety_test"
+g++ -std=c++17 -Wall -Wextra -Werror $shibo_includes tests/leg_test.cpp \
+    user_lib/controller/leg.cpp -o "$shibo_test_dir/leg_test"
+"$shibo_test_dir/leg_test"
 gcc -std=c11 -Imanaged_components/espressif__cjson/cJSON -c \
     managed_components/espressif__cjson/cJSON/cJSON.c -o "$shibo_test_dir/cjson.o"
 g++ -std=c++17 -Wall -Wextra -Werror $shibo_includes tests/config_test.cpp \

@@ -1,8 +1,11 @@
 #include "leg.h"
 
+#include "config.h"
+#include "input.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <algorithm>
+#include <cmath>
 
 namespace leg
 {
@@ -10,8 +13,8 @@ namespace leg
     {
         struct command
         {
-            leg_servo::command left{2088, 450, 250};
-            leg_servo::command right{2008, 450, 250};
+            leg_servo::command left{LEG_LEFT_MIN, 450, 250};
+            leg_servo::command right{LEG_RIGHT_MIN, 450, 250};
             uint8_t left_mode = 0;
             uint8_t right_mode = 0;
             uint32_t pose_sequence = 0;
@@ -21,6 +24,12 @@ namespace leg
         portMUX_TYPE lock = portMUX_INITIALIZER_UNLOCKED;
         command target;
         package latest;
+
+        float height_base = 20.0f;
+        float roll_target_deg = 0.0f;
+        float roll_filtered_deg = 0.0f;
+        float roll_integral = 0.0f;
+        float roll_error = 0.0f;
 
         /**
          * @brief 作为舵机串口唯一所有者，每 10 ms 写目标、每 20 ms 读取反馈
@@ -90,16 +99,80 @@ namespace leg
     }
 
     /**
-     * @brief 获取缓存的左右腿反馈
+     * @brief 获取缓存的左右腿反馈并计算模型高度
      *
-     * @return 最新腿部反馈及通信、校准状态
+     * @return 最新腿部反馈、模型高度及通信、校准状态
      */
     package get()
     {
         portENTER_CRITICAL(&lock);
-        const package snapshot = latest;
+        package snapshot = latest;
         portEXIT_CRITICAL(&lock);
+
+        const config::settings &settings = config::get();
+        snapshot.height_m = settings.balance.model_height_m;
+        if(settings.height_feedback)
+        {
+            const float angles[2] = {snapshot.left.position_rad, snapshot.right.position_rad};
+            const float *poly = settings.height_poly;
+            snapshot.height_m = 0.0f;
+            for(float angle : angles)
+            {
+                const float count = fabsf(angle * (4096.0f / 6.28318530718f) - 2048.0f);
+                const float height = ((poly[0] * count + poly[1]) * count + poly[2]) * count + poly[3];
+                snapshot.height_m += height * settings.height_com_scale + settings.height_com_offset_m;
+            }
+            snapshot.height_m *= 0.5f;
+        }
         return snapshot;
+    }
+
+    /**
+     * @brief 清空控制任务持有的腿高和横滚 PID 状态
+     */
+    void reset()
+    {
+        height_base = 20.0f;
+        roll_target_deg = 0.0f;
+        roll_filtered_deg = 0.0f;
+        roll_integral = 0.0f;
+        roll_error = 0.0f;
+    }
+
+    /**
+     * @brief 在控制任务中更新腿高、横滚 PID 并提交舵机目标
+     *
+     * @param[in] roll_rad 横滚角，单位 rad
+     * @param[in] held 当前按住的按键
+     * @param[in] reset_pose 是否恢复默认腿高和横滚目标
+     * @param[in] tick_ms 更新周期，单位 ms
+     * @param[in] offset 腿部弯曲位置偏移，单位编码器计数
+     */
+    void update(float roll_rad, uint16_t held, bool reset_pose, uint32_t tick_ms, float offset)
+    {
+        const config::settings &settings = config::get();
+        const float dt = tick_ms * 0.001f;
+        if(reset_pose){reset();}
+
+        const bool modifier = held & control::buttons::SELECT;
+        const int8_t height_direction = modifier ? 0 :
+            (held & control::buttons::DOWN ? 1 : 0) - (held & control::buttons::UP ? 1 : 0);
+        const int8_t roll_direction = modifier ? 0 :
+            (held & control::buttons::RIGHT ? 1 : 0) - (held & control::buttons::LEFT ? 1 : 0);
+        height_base = std::clamp(height_base + height_direction * 25.0f * dt, -10.0f, 52.0f);
+        roll_target_deg = std::clamp(roll_target_deg + roll_direction * 25.0f * dt, -15.0f, 15.0f);
+        roll_filtered_deg += dt / (0.3f + dt) * (roll_rad * 180.0f / 3.14159265359f - roll_filtered_deg);
+
+        const float error = roll_filtered_deg - roll_target_deg;
+        roll_integral = std::clamp(roll_integral + settings.roll_i * error * dt,
+            -settings.roll_limit_count, settings.roll_limit_count);
+        const float correction = std::clamp(settings.roll_p * error + roll_integral +
+            settings.roll_d * (error - roll_error) / dt, -settings.roll_limit_count, settings.roll_limit_count);
+        roll_error = error;
+
+        const float bend = 8.4f * (30.0f - height_base) + offset;
+        set_pose(static_cast<int16_t>(std::clamp(2048.0f + bend - correction, 2088.0f, 2398.0f)),
+            static_cast<int16_t>(std::clamp(2048.0f - bend - correction, 1698.0f, 2008.0f)), 1000, 0);
     }
 
     /**

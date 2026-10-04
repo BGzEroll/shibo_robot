@@ -31,7 +31,7 @@ Xbox 优先于上位机。Xbox 连接成功时提供一次振动反馈。连接�
 
 网页可编辑 `gain_poly`、轮半径、质心高度、俯仰零偏、速度参考滤波、积分限幅、电机 R/Kt/Ke/母线电压/力矩限幅、最大速度、横滚 PID、电池阈值，以及腿长/质心高度映射。手柄处于配对模式时会自动扫描 Xbox，网页显示 MAC；地址留空时自动选择扫描到的 Xbox，也可填写固定 MAC 后保存。
 
-网页状态请求完成后等待 1 秒再刷新，约 1 Hz。HTTP 服务按请求处理，没有固定周期；当前绑定 core 0，优先级 4，任务栈为 6144 字节。
+网页状态请求完成后等待 1 秒再刷新，约 1 Hz。HTTP 服务按请求处理，没有固定周期；当前绑定 core 0，优先级 3，任务栈为 6144 字节。
 
 参数以 JSON 存在 NVS。先用 Start 停止，再点击“保存并重启”；一组配置在重启后统一生效，重启后仍需 RB 起身。支持导入完整配置或 MATLAB 的局部增益配置，导入本身只修改表单。JSON 导出含 Wi-Fi 密码。
 
@@ -57,7 +57,11 @@ Xbox 优先于上位机。Xbox 连接成功时提供一次振动反馈。连接�
 | 状态灯 | GPIO13；GPIO21 两颗 WS2812，RMT |
 | 上位机/视觉 | UART0，TX1/RX3，115200 baud；也用于启动日志/固定监视屏 |
 
-`motor` 在 core 1 由 PWM 通知执行 FOC；`control` 在 core 0 每 1 ms 平衡、每 10 ms 更新输入和动作。腿总线有独立任务，每 10 ms 写变化的目标、每 20 ms 读反馈，控制任务和监视屏读取快照。电池/灯效、UART0、BLE 扫描各有低优先级任务。腿部逻辑位于 `controller/leg.cpp`，底层串口驱动位于 `hw/leg_servo.cpp`；手柄报告解析合并在 `hw/gamepad.cpp`；UART0 上位机接收与输入路由放在 `controller/input.cpp/.h` 中，分别由 `host` 和 `input_router` 命名空间实现。网页使用 IDF HTTP Server，参数使用 NVS，BLE 使用原生 NimBLE/HID Host。
+`motor` 和 `sensor` 在 core 1，优先级为 5；`control` 在 core 0，优先级为 4，每 1 ms 平衡、每 10 ms 更新输入和动作。core 0 的其他项目任务：HTTP 和监视屏为 3，腿部和上位机接收为 2，手柄连接与电池为 1；IDF 内部任务保留默认优先级。
+
+`controller/input.cpp` 中的 `host` 接收 UART0 遥控和视觉帧，`input_router` 选择来源并输出速度、按住和新按下的按键。模式相关按键映射与私有动作状态集中在 `action.cpp`，相机手动调节和视觉跟踪共用一个目标角度。`control.cpp` 先检查反馈、循环时长与启停条件，再更新动作、计算平衡力矩并发布状态；手动停止和故障停止共用动作清理入口，直立和动作计时使用实际经过时间。
+
+腿部几何、横滚 PID 和目标缓存位于 `controller/leg.cpp`。姿态计算由控制任务调用；独立腿部任务每 10 ms 写变化的目标、每 20 ms 读取反馈，控制任务和监视屏只读取快照。底层舵机协议与 UART 薄封装保留在 `hw/leg_servo.cpp`。手柄报告解析位于 `hw/gamepad.cpp`；网页使用 IDF HTTP Server，参数使用 NVS，BLE 使用原生 NimBLE/HID Host。
 
 编码器 5 ms、IMU 15 ms、腿反馈 100 ms、遥控输入 250 ms 为有效期；电机命令超过 20 ms 也由 FOC 层关闭输出。腿高度调度默认关闭，使用固定 0.048 m；完成质心高度映射核对后可在网页开启。详细模型假设和力矩换算见 [LQR 调参说明](docs/lqr_tuning.md)。
 
@@ -80,6 +84,6 @@ sh tests/run_host.sh
 python tests/check_lqr.py  # 需要 numpy、scipy
 ```
 
-`sdkconfig.defaults`、分区表和 cJSON 依赖清单已经纳入项目；应用分区为 2 MiB。主机回归覆盖动作时序、输入边沿/过期、视觉丢失、参数导入/保存边界及 IMU 过期停机。LQR 数值验证覆盖 float32 系数的 1001 个高度点。
+`sdkconfig.defaults`、分区表和 cJSON 依赖清单已经纳入项目；应用分区为 2 MiB。主机回归覆盖五种跳跃和坐下/校准时序、输入边沿/过期、视觉丢失与相机交接、动作中断、腿部 PID/几何及目标去重、参数导入/保存、反馈过期/跌倒/循环超时停机、手动重启与配置锁定。LQR 数值验证覆盖 float32 系数的 1001 个高度点。
 
 这些检查是源代码、主机模型和构建验证；没有烧录，也没有验证实际 BLE 配对、Wi-Fi/FOC 共存时序、轮电机力矩、腿部动作或视觉硬件效果。仓库中的默认增益是模型候选值，不能视作实机调试完成。

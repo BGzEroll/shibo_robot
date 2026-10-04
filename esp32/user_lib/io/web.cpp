@@ -151,13 +151,13 @@ namespace web
 
             cJSON *json = cJSON_CreateObject();
             cJSON_AddNumberToObject(json, "state", static_cast<uint8_t>(state.state));
-            cJSON_AddNumberToObject(json, "mode", state.mode);
+            cJSON_AddNumberToObject(json, "mode", static_cast<uint8_t>(state.mode));
             cJSON_AddNumberToObject(json, "phase", state.phase);
             cJSON_AddBoolToObject(json, "enabled", state.enabled);
             cJSON_AddBoolToObject(json, "calibrated", state.calibration_success);
-            cJSON_AddNumberToObject(json, "pitch_rad", state.pitch_rad);
-            cJSON_AddNumberToObject(json, "speed_m_s", state.speed_m_s);
-            cJSON_AddNumberToObject(json, "height_m", state.avg_leg_height);
+            cJSON_AddNumberToObject(json, "pitch_rad", state.measured.pitch_rad);
+            cJSON_AddNumberToObject(json, "speed_m_s", state.measured.speed_m_s);
+            cJSON_AddNumberToObject(json, "height_m", state.measured.avg_leg_height);
             cJSON_AddNumberToObject(json, "left_torque_Nm", state.left_torque_Nm);
             cJSON_AddNumberToObject(json, "right_torque_Nm", state.right_torque_Nm);
 
