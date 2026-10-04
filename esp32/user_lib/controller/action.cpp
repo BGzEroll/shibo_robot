@@ -1,7 +1,7 @@
 #include "action.h"
 
 #include "config.h"
-#include "hw/leg.h"
+#include "leg.h"
 #include "hw/aux_servo.h"
 #include "sys_time.h"
 #include <algorithm>

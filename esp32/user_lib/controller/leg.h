@@ -1,7 +1,7 @@
 #ifndef LEG_H
 #define LEG_H
 
-#include "leg_servo.h"
+#include "hw/leg_servo.h"
 
 namespace leg
 {

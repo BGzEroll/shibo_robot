@@ -6,7 +6,7 @@
 #include "config.h"
 #include "hw/motor.h"
 #include "hw/sensor.h"
-#include "hw/leg.h"
+#include "leg.h"
 #include "hw/battery.h"
 #include "hw/aux_servo.h"
 #include "io/host.h"

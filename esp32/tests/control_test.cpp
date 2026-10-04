@@ -3,7 +3,7 @@
 #include "controller/input.h"
 #include "config.h"
 #include "hw/gamepad.h"
-#include "hw/leg.h"
+#include "controller/leg.h"
 #include "hw/aux_servo.h"
 #include "io/host.h"
 #include <cassert>

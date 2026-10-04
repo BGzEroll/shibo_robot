@@ -1,7 +1,7 @@
 #include "config.h"
 #include "hw/motor.h"
 #include "hw/sensor.h"
-#include "hw/leg.h"
+#include "controller/leg.h"
 #include "hw/aux_servo.h"
 #include "hw/battery.h"
 #include "hw/gamepad.h"

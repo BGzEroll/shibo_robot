@@ -3,7 +3,7 @@
 #include "controller/control.h"
 #include "hw/sensor.h"
 #include "hw/leg_servo.h"
-#include "hw/leg.h"
+#include "controller/leg.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
