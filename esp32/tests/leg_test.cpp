@@ -1,5 +1,4 @@
 #include "controller/leg.h"
-#include "controller/input.h"
 #include "config.h"
 #include "freertos/task.h"
 #include <cassert>
@@ -146,18 +145,18 @@ void vTaskDelayUntil(TickType_t *, TickType_t period)
         case 10:
             assert(left_target.position == 2132 && right_target.position == 1964);
             assert(left_target.speed == 1000 && torque_mode == 0);
-            leg::update(0, control::buttons::DOWN, false, 10);
+            leg::update(0, 1, 0, false, 10);
             break;
         case 20:
             assert(left_target.position == 2129 && right_target.position == 1966);
-            leg::update(0, control::buttons::RIGHT, true, 10);
+            leg::update(0, 0, 1, true, 10);
             break;
         case 30:
             assert(left_target.position == 2134 && right_target.position == 1966);
-            leg::set_torque(128, 128);
+            leg::calibrate_middle();
             break;
         case 40:
-            assert(calibrations == 2 && leg::get().calibrated);
+            assert(calibrations == 2 && leg::get().calibration_sent && torque_mode == 0);
             break;
         case 50:
             assert(calibrations == 2 && writes == 3);
@@ -172,16 +171,25 @@ void vTaskDelayUntil(TickType_t *, TickType_t period)
             settings.height_poly[3] = 0.01f;
             settings.height_com_scale = 2;
             settings.height_com_offset_m = 0.003f;
-            assert(fabsf(leg::get().height_m - 0.103f) < 1e-6f);
-            settings.height_feedback = false;
-            settings.balance.model_height_m = 0.06f;
-            assert(leg::get().height_m == 0.06f);
+            assert(leg::get().height_m == settings.balance.model_height_m);
             leg::reset();
-            leg::update(0, control::buttons::SELECT | control::buttons::DOWN, false, 10, 50);
-            leg::set_torque(0, 0);
+            leg::update(0, 0, 0, false, 10, 50);
+            leg::set_mode(0);
             break;
         case 70:
             assert(left_target.position == 2182 && right_target.position == 1914 && torque_mode == 0);
+            assert(fabsf(leg::get().height_m - 0.103f) < 1e-6f);
+            settings.height_feedback = false;
+            settings.balance.model_height_m = 0.06f;
+            assert(fabsf(leg::get().height_m - 0.103f) < 1e-6f);
+            leg::calibrate_middle();
+            break;
+        case 80:
+            assert(calibrations == 4 && leg::get().calibration_sent && torque_mode == 0);
+            assert(fabsf(leg::get().height_m - 0.103f) < 1e-6f);
+            break;
+        case 90:
+            assert(leg::get().height_m == 0.06f);
             throw finished{};
     }
 }
@@ -195,7 +203,7 @@ int32_t main()
 {
     assert(leg::init());
     leg::reset();
-    leg::update(0, 0, false, 10);
+    leg::update(0, 0, 0, false, 10);
     try
     {
         leg_task(nullptr);

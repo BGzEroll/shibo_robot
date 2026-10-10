@@ -19,16 +19,17 @@ namespace leg
 
         float height_m = 0.048f;
         bool io_failed = false;
-        bool calibrated = false;
+        bool calibration_sent = false;
     };
 
     bool init();
     package get();
     void reset();
-    void update(float roll_rad, uint16_t held, bool reset_pose,
-        uint32_t tick_ms, float offset = 0.0f);
+    void update(float roll_rad, int8_t height_direction, int8_t roll_direction,
+        bool reset_pose, uint32_t tick_ms, float offset = 0.0f);
     void set_pose(int16_t left, int16_t right, uint16_t speed, uint8_t acceleration);
-    void set_torque(uint8_t left, uint8_t right);
+    void set_mode(uint8_t mode);
+    void calibrate_middle();
 }
 
 #endif

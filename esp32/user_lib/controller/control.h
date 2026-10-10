@@ -60,7 +60,7 @@ namespace control
         uint32_t upright_ms = 0;
 
         bool enabled = false;
-        bool calibration_success = false;
+        bool calibration_sent = false;
     };
 
     bool init(bool hardware_ready = true);

@@ -28,7 +28,6 @@ namespace leg_servo
         float voltage_v = 0.0f;
         uint8_t temperature_c = 0;
         bool moving = false;
-        float current_a = 0.0f;     // STS3032 不提供电流反馈
         uint8_t status_bits = 0;        // 舵机错误位
     };
 

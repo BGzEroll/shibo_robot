@@ -110,7 +110,7 @@ namespace leg_servo
         constexpr uint8_t MIDDLE_CALIBRATION = 128;
         constexpr uint8_t ACCELERATION = 41;
         constexpr uint8_t PRESENT_POSITION = 56;
-        constexpr uint8_t FEEDBACK_SIZE = 15;
+        constexpr uint8_t FEEDBACK_SIZE = 11;
         constexpr uint64_t READ_TIMEOUT_US = 5000;
         constexpr float RAD_PER_COUNT = 6.2831853f / 4096.0f;
         constexpr float SPEED_RAD_S_PER_COUNT = 50.0f * RAD_PER_COUNT;
@@ -168,7 +168,6 @@ namespace leg_servo
             const uint16_t position = read_word(data);
             const uint16_t speed = read_word(data + 2);
             const uint16_t load = read_word(data + 4);
-            const uint16_t current = read_word(data + 13);
 
             const int16_t position_count = position & 0x8000 ?
                 -static_cast<int16_t>(position & 0x7FFF) :
@@ -179,9 +178,6 @@ namespace leg_servo
             const int16_t duty_count = load & 0x400 ?
                 -static_cast<int16_t>(load & 0x3FF) :
                 static_cast<int16_t>(load & 0x3FF);
-            const int16_t current_count = current & 0x8000 ?
-                -static_cast<int16_t>(current & 0x7FFF) :
-                static_cast<int16_t>(current);
 
             output.position_rad = position_count * RAD_PER_COUNT;
             output.speed_rad_s = speed_count * SPEED_RAD_S_PER_COUNT;
@@ -189,7 +185,6 @@ namespace leg_servo
             output.voltage_v = data[6] * 0.1f;
             output.temperature_c = data[7];
             output.moving = data[10] != 0;
-            output.current_a = current_count * 0.0065f;
             output.status_bits = frame[4];
             output.timestamp_us = sys_time::get_us_tick();
             output.valid = true;

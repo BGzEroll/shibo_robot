@@ -72,8 +72,28 @@ namespace control::action
         {
             enter(mode::BOOT);
             leg::set_pose(leg::LEG_LEFT_MIN, leg::LEG_RIGHT_MIN, 450, 250);
-            leg::set_torque(1, 1);
+            leg::set_mode(1);
             leg::reset();
+        }
+
+        /**
+         * @brief 将按键转换为腿部伸缩和横滚调整方向并更新姿态
+         *
+         * @param[in] input 速度和按键快照
+         * @param[in] roll_rad 横滚角，单位 rad
+         * @param[in] reset_pose 是否恢复默认腿高和横滚目标
+         * @param[in] tick_ms 动作周期，单位 ms
+         * @param[in] offset 腿部弯曲位置偏移，单位编码器计数
+         */
+        void update_leg(const control_input &input, float roll_rad, bool reset_pose,
+            uint32_t tick_ms, float offset = 0.0f)
+        {
+            const bool modifier = input.held & buttons::SELECT;
+            const int8_t height_direction = modifier ? 0 :
+                (input.held & buttons::DOWN ? 1 : 0) - (input.held & buttons::UP ? 1 : 0);
+            const int8_t roll_direction = modifier ? 0 :
+                (input.held & buttons::RIGHT ? 1 : 0) - (input.held & buttons::LEFT ? 1 : 0);
+            leg::update(roll_rad, height_direction, roll_direction, reset_pose, tick_ms, offset);
         }
 
         /**
@@ -105,7 +125,7 @@ namespace control::action
             balance_command command;
             command.mode = balance_mode::RECOVER;
             command.recover_blend = std::min(value.timer_ms / 220.0f, 1.0f);
-            leg::update(measured.roll_angle, input.held, false, tick_ms);
+            update_leg(input, measured.roll_angle, false, tick_ms);
 
             const bool stable =
                 fabsf(measured.pitch_rad - config::get().balance.pitch_offset_rad) < 0.16f &&
@@ -151,7 +171,7 @@ namespace control::action
             {
                 enter(mode::MIDDLE_CALIBRATION);
                 value.phase = SEATED;
-                leg::set_torque(0, 0);
+                leg::set_mode(0);
             }
 
             balance_command command;
@@ -163,7 +183,7 @@ namespace control::action
                 if(abs(static_cast<int16_t>(legs.left.position_rad * count_per_rad) - 2048) <= 50 &&
                    abs(static_cast<int16_t>(legs.right.position_rad * count_per_rad) - 2048) <= 50)
                 {
-                    leg::set_torque(2, 2);
+                    leg::set_mode(2);
                     value.phase = DAMP;
                     value.timer_ms = 0;
                 }
@@ -183,13 +203,13 @@ namespace control::action
             }
             if(value.phase == SEATED)
             {
-                if((input.held & buttons::LS) || value.timer_ms >= 10000){leg::set_torque(0, 0);}
+                if((input.held & buttons::LS) || value.timer_ms >= 10000){leg::set_mode(0);}
                 if(value.current_mode == mode::MIDDLE_CALIBRATION)
                 {
-                    leg::set_torque(0, 0);
+                    leg::set_mode(0);
                     if(value.timer_ms >= 2000)
                     {
-                        leg::set_torque(128, 128);
+                        leg::calibrate_middle();
                         value.phase = CALIBRATED;
                     }
                 }
@@ -436,7 +456,7 @@ namespace control::action
             }
 
             const bool kicking = value.current_mode == mode::KICK_PLACE || value.current_mode == mode::KICK_RUN;
-            leg::update(measured.roll_angle, input.held, reset_pose, tick_ms, kicking ? 50.0f : 0.0f);
+            update_leg(input, measured.roll_angle, reset_pose, tick_ms, kicking ? 50.0f : 0.0f);
             if(kicking){kick(input, measured, vision, command, exit_requested, tick_ms);}
             return command;
         }
@@ -461,7 +481,7 @@ namespace control::action
     {
         enter(mode::STOP);
         leg::reset();
-        leg::set_torque(0, 0);
+        leg::set_mode(0);
         aux_servo::set_frontier(180);
         return {};
     }

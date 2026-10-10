@@ -16,6 +16,9 @@ namespace
     config::settings settings;
     uint64_t clock_us = 1000000;
     uint8_t leg_mode = 0;
+    int8_t height_direction = 0;
+    int8_t roll_direction = 0;
+    uint32_t calibrations = 0;
     int16_t left_pose = 0;
     int16_t right_pose = 0;
     uint16_t camera = 0;
@@ -74,20 +77,33 @@ namespace leg
     }
 
     /**
-     * @brief 替代动作测试中的连续腿部姿态更新
+     * @brief 记录动作传递的腿部调整方向
+     *
+     * @param[in] height 腿部伸缩调整方向
+     * @param[in] roll 横滚目标调整方向
      */
-    void update(float, uint16_t, bool, uint32_t, float)
+    void update(float, int8_t height, int8_t roll, bool, uint32_t, float)
     {
+        height_direction = height;
+        roll_direction = roll;
     }
 
     /**
-     * @brief 记录测试中的腿部力矩模式
+     * @brief 记录测试中的腿部工作模式
      *
-     * @param[in] left 左腿模式
+     * @param[in] mode 左右腿共同模式
      */
-    void set_torque(uint8_t left, uint8_t)
+    void set_mode(uint8_t mode)
     {
-        leg_mode = left;
+        leg_mode = mode;
+    }
+
+    /**
+     * @brief 记录动作提交的独立校准请求
+     */
+    void calibrate_middle()
+    {
+        calibrations++;
     }
 }
 
@@ -198,6 +214,22 @@ int32_t main()
 
     assert(step().mode == balance_mode::OFF);
     start();
+
+    // 腿部仅接收操作方向，SELECT 组合键不会调整腿部目标。
+    input.held = buttons::DOWN | buttons::RIGHT;
+    step();
+    assert(height_direction == 1 && roll_direction == 1);
+    input.held = buttons::UP | buttons::LEFT;
+    step();
+    assert(height_direction == -1 && roll_direction == -1);
+    input.held = buttons::UP | buttons::DOWN | buttons::LEFT | buttons::RIGHT;
+    step();
+    assert(height_direction == 0 && roll_direction == 0);
+    input.held = buttons::SELECT | buttons::DOWN | buttons::RIGHT;
+    step();
+    assert(height_direction == 0 && roll_direction == 0);
+    input.held = 0;
+
     input.pressed = buttons::START;
     assert(step().mode == balance_mode::OFF && leg_mode == 0);
     assert(actions.current_mode == mode::STOP && actions.phase == 0 && frontier == 180);
@@ -267,7 +299,9 @@ int32_t main()
     assert(actions.current_mode == mode::MIDDLE_CALIBRATION);
     input.held = 0;
     advance(200);
-    assert(actions.phase == 3 && leg_mode == 128);
+    assert(actions.phase == 3 && leg_mode == 0 && calibrations == 1);
+    advance(10);
+    assert(calibrations == 1);
     start();
 
     for(uint16_t button : {buttons::X, buttons::Y})

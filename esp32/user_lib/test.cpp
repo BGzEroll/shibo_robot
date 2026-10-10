@@ -43,11 +43,11 @@ namespace test
                         "IMU t=%12" PRIu64 " gyroY=%+7.3f gyroZ=%+7.3f rad/s\n"
                         "L t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
                         "R t=%12" PRIu64 " c=%+10" PRId32 " w=%+8" PRId32 " mrad/s\n"
-                        "LEG ok  rad  rad/s duty     V   C     A mov err\n"
+                        "LEG ok  rad  rad/s duty     V   C mov err\n"
                         "  L %2" PRIu32 " %5.2f %+6.2f %+5.2f %5.2f %3" PRIu32
-                        " %+5.2f  %" PRIu32 "  %02" PRIX32 "\n"
+                        "  %" PRIu32 "  %02" PRIX32 "\n"
                         "  R %2" PRIu32 " %5.2f %+6.2f %+5.2f %5.2f %3" PRIu32
-                        " %+5.2f  %" PRIu32 "  %02" PRIX32 "\n"
+                        "  %" PRIu32 "  %02" PRIX32 "\n"
                         "last_us L=%12" PRIu64 " R=%12" PRIu64 "\033[J",
                         ARM_STATES[static_cast<uint8_t>(control_status.state)],
                         control_status.measured.pitch_rad,
@@ -68,7 +68,6 @@ namespace test
                         left_servo.drive_duty,
                         left_servo.voltage_v,
                         static_cast<uint32_t>(left_servo.temperature_c),
-                        left_servo.current_a,
                         static_cast<uint32_t>(left_servo.moving),
                         static_cast<uint32_t>(left_servo.status_bits),
                         static_cast<uint32_t>(right_servo.valid),
@@ -77,7 +76,6 @@ namespace test
                         right_servo.drive_duty,
                         right_servo.voltage_v,
                         static_cast<uint32_t>(right_servo.temperature_c),
-                        right_servo.current_a,
                         static_cast<uint32_t>(right_servo.moving),
                         static_cast<uint32_t>(right_servo.status_bits),
                         left_servo.timestamp_us,

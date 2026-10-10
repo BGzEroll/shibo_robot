@@ -149,15 +149,22 @@ namespace leg
     /**
      * @brief 记录动作是否提交了腿部更新
      */
-    void update(float, uint16_t, bool, uint32_t, float)
+    void update(float, int8_t, int8_t, bool, uint32_t, float)
     {
         pose_updates++;
     }
 
     /**
-     * @brief 替代测试中无需执行的舵机力矩输出
+     * @brief 替代测试中无需执行的舵机模式切换
      */
-    void set_torque(uint8_t, uint8_t)
+    void set_mode(uint8_t)
+    {
+    }
+
+    /**
+     * @brief 替代测试中无需执行的舵机中位校准
+     */
+    void calibrate_middle()
     {
     }
 }

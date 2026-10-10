@@ -172,7 +172,7 @@ namespace control
                 next.right_torque_Nm = torque.right_Nm;
                 next.mode = actions.current_mode;
                 next.phase = actions.phase;
-                next.calibration_success = legs.calibrated;
+                next.calibration_sent = legs.calibration_sent;
 
                 if(faulted){next.state = fault_reason;}
                 else if(!input_ready){next.state = arm_state::wait_input;}
