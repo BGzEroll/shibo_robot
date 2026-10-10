@@ -27,7 +27,7 @@ extern "C" void app_init(void)
     const bool legs_ready = leg::init();
     const bool aux_ready = aux_servo::init();
     const bool sensors_ready = sensor::init();
-    const bool motors_ready = sensors_ready && motor::init(config::get().motor);
+    const bool motors_ready = battery_ready && sensors_ready && motor::init(config::get().motor);
     const bool host_ready = host::init();
     const bool gamepad_ready = gamepad::init();
     const bool control_ready = control::init(battery_ready && legs_ready && aux_ready && motors_ready);

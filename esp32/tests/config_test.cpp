@@ -96,6 +96,7 @@ int32_t main()
     assert(config::init());
     config::settings original = config::get();
     cJSON *json = config::to_json(original);
+    assert(cJSON_GetObjectItem(cJSON_GetObjectItem(json, "motor"), "bus_voltage_V") == nullptr);
     config::settings copy;
     assert(config::from_json(json, copy));
     cJSON_Delete(json);

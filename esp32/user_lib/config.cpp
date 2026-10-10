@@ -44,7 +44,6 @@ namespace config
             FIELD("motor", motor.phase_resistance_ohm, 0.1f, 50.0f)
             FIELD("motor", motor.kt_Nm_A, 0.001f, 1.0f)
             FIELD("motor", motor.ke_V_s_rad, 0.001f, 1.0f)
-            FIELD("motor", motor.bus_voltage_V, 4.0f, 12.6f)
             FIELD("motor", motor.torque_limit_Nm, 0.001f, 0.2f)
 
             FIELD("motion", max_linear_m_s, 0.01f, 1.0f)

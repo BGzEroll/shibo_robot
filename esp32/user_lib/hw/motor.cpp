@@ -1,6 +1,7 @@
 #include "motor.h"
 
 #include "hw/sensor.h"
+#include "battery.h"
 #include "sys_time.h"
 #include "driver/gpio.h"
 #include "driver/mcpwm_prelude.h"
@@ -26,6 +27,8 @@ namespace motor
         int32_t alignment_uq = 0;
         int32_t torque_gain_q16 = 0;
         int32_t bemf_gain_q14 = 0;
+        uint64_t voltage_time_us = 0;
+        bool voltage_ready = false;
 
         struct context
         {
@@ -260,14 +263,40 @@ namespace motor
         }
 
         /**
-         * @brief 等待当前电机的新编码器样本
+         * @brief 每 50 ms 按实测母线电压更新校准、力矩和反电动势换算系数
+         *
+         * @param[in] now_us 当前时间，单位 us
+         *
+         * @return true 母线电压可用
+         * @return false 电池测量无效或电压为零
+         */
+        bool update_bus_voltage(uint64_t now_us)
+        {
+            if(now_us - voltage_time_us < 50000){return voltage_ready;}
+            voltage_time_us = now_us;
+
+            const battery::state voltage = battery::get();
+            voltage_ready = voltage.valid && voltage.voltage_V > 0.0f;
+            if(!voltage_ready){return false;}
+
+            const float scale = Q15_ONE / voltage.voltage_V;
+            alignment_uq = static_cast<int32_t>(3.0f * scale + 0.5f);
+            torque_gain_q16 = static_cast<int32_t>(settings.phase_resistance_ohm /
+                settings.kt_Nm_A * scale / 1000000.0f * 65536.0f + 0.5f);
+            bemf_gain_q14 = static_cast<int32_t>(settings.ke_V_s_rad *
+                scale / 1000.0f * 16384.0f + 0.5f);
+            return true;
+        }
+
+        /**
+         * @brief 等待当前电机的新编码器样本并更新母线电压
          *
          * @param[in, out] motor 电机上下文
          * @param[out] next 新编码器样本
          * @param[in] timeout_ms 最长等待时间
          *
          * @return true 收到新鲜样本
-         * @return false 等待或编码器超时
+         * @return false 等待或编码器超时、母线电压无效
          */
         bool wait_encoder(context &motor, sensor::encoder_data &next, uint32_t timeout_ms)
         {
@@ -279,6 +308,7 @@ namespace motor
                 sensor::get_package(snapshot);      // 返回值只表示 IMU 是否就绪。
                 next = snapshot.*motor.encoder;
                 const uint64_t now_us = sys_time::get_us_tick();
+                if(!update_bus_voltage(now_us)){return false;}
                 if(next.timestamp_us != 0 &&
                    next.timestamp_us != motor.last_encoder_us &&
                    now_us >= next.timestamp_us &&
@@ -298,14 +328,14 @@ namespace motor
         }
 
         /**
-         * @brief 保持当前电角度并持续检查编码器
+         * @brief 按实测母线电压保持对齐电角度并持续检查编码器
          *
          * @param[in, out] motor 电机上下文
          * @param[out] encoder 最后一个编码器样本
          * @param[in] duration_ms 保持时间
          *
          * @return true 持续收到新鲜样本
-         * @return false 编码器超时
+         * @return false 编码器超时或母线电压无效
          */
         bool hold_encoder(context &motor, sensor::encoder_data &encoder,
             uint32_t duration_ms)
@@ -315,6 +345,7 @@ namespace motor
             while(sys_time::get_us_tick() < deadline)
             {
                 if(!wait_encoder(motor, encoder, 20)){return false;}
+                output(motor, alignment_uq, 0xC000);
             }
             return true;
         }
@@ -325,7 +356,7 @@ namespace motor
          * @param[in, out] motor 电机上下文
          *
          * @return true 校准成功
-         * @return false 编码器超时或方向扫描失败
+         * @return false 编码器超时、母线电压无效或方向扫描失败
          */
         bool calibrate(context &motor)
         {
@@ -447,7 +478,8 @@ namespace motor
                     now_us >= snapshot.right_encoder.timestamp_us &&
                     now_us - snapshot.left_encoder.timestamp_us <= ENCODER_TIMEOUT_US &&
                     now_us - snapshot.right_encoder.timestamp_us <= ENCODER_TIMEOUT_US;
-                const bool active = fresh && current.enabled &&
+                const bool voltage_ok = update_bus_voltage(now_us);
+                const bool active = voltage_ok && fresh && current.enabled &&
                     now_us >= current.timestamp_us &&
                     now_us - current.timestamp_us <= COMMAND_TIMEOUT_US;
 
@@ -472,16 +504,20 @@ namespace motor
      * @param[in] next_settings 电机物理参数及力矩上限
      *
      * @return true 初始化成功
-     * @return false PWM、校准或任务创建失败
+     * @return false 母线电压、PWM、校准或任务创建失败
      */
     bool init(const config &next_settings)
     {
         settings = next_settings;
-        alignment_uq = static_cast<int32_t>(3.0f / settings.bus_voltage_V * Q15_ONE + 0.5f);
-        torque_gain_q16 = static_cast<int32_t>(settings.phase_resistance_ohm /
-            settings.kt_Nm_A / settings.bus_voltage_V * Q15_ONE / 1000000.0f * 65536.0f + 0.5f);
-        bemf_gain_q14 = static_cast<int32_t>(settings.ke_V_s_rad /
-            settings.bus_voltage_V * Q15_ONE / 1000.0f * 16384.0f + 0.5f);
+        voltage_time_us = 0;
+        voltage_ready = false;
+        const uint64_t deadline = sys_time::get_us_tick() + 1000000;
+        while(!update_bus_voltage(sys_time::get_us_tick()))
+        {
+            if(sys_time::get_us_tick() >= deadline){return false;}
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+
         if(!init_pwm()){return false;}
 
         context *motors[2] = {&left, &right};
